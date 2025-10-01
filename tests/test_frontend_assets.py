@@ -30,3 +30,16 @@ def test_index_includes_render_pipeline_controls():
     assert 'id="render-button"' in content
     assert 'id="download-button"' in content
     assert 'id="render-status"' in content
+
+
+def test_controls_sections_allow_multiple_open():
+    controls_path = Path('static/js/controls.js')
+    content = controls_path.read_text('utf-8')
+    assert 'dataset.bsParent' not in content
+
+
+def test_history_entries_expose_actions():
+    presets_path = Path('static/js/presets.js')
+    content = presets_path.read_text('utf-8')
+    assert 'Reapply' in content
+    assert 'Remove' in content
