@@ -37,6 +37,11 @@ def test_index_served(client):
     assert "<canvas" in response.text
 
 
+def test_index_has_no_webgl_warning(client):
+    response = client.get("/")
+    assert "WebGL2 is unavailable" not in response.text
+
+
 def test_presets_endpoint(client):
     response = client.get("/api/presets")
     assert response.status_code == 200

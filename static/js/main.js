@@ -18,6 +18,13 @@ const historyList = document.getElementById('history-list');
 const togglePresets = document.getElementById('toggle-presets');
 const previewCanvas = document.getElementById('preview-canvas');
 
+function removeLegacyWebglWarning() {
+  const warning = document.getElementById('webgl-warning');
+  if (warning) {
+    warning.remove();
+  }
+}
+
 let currentState = null;
 let renderer = null;
 let controlPanel = null;
@@ -27,6 +34,7 @@ let shaderOptions = [];
 bootstrap();
 
 async function bootstrap() {
+  removeLegacyWebglWarning();
   shaderOptions = await loadShaderOptions();
   currentState = initState();
   renderer = new WallpaperRenderer(previewCanvas, currentState);
