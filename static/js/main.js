@@ -31,6 +31,17 @@ let lastRenderResult = null;
 let renderDirty = true;
 let isRendering = false;
 let autoRenderHandle = null;
+let pendingHistorySnapshot = null;
+let pendingHistoryDetail = '';
+
+const commitHistoryEntry = debounce(() => {
+  if (!pendingHistorySnapshot || !pendingHistoryDetail || !presets) {
+    return;
+  }
+  presets.addHistory('Adjusted', pendingHistorySnapshot, { detail: pendingHistoryDetail });
+  pendingHistorySnapshot = null;
+  pendingHistoryDetail = '';
+}, 500);
 
 bootstrap();
 
@@ -88,7 +99,7 @@ function handleStateChange(nextState) {
   updateState(nextState);
   renderer.updateState(nextState);
   const detail = summarizeStateChange(previousState, currentState);
-  presets.addHistory('Adjusted', currentState, { detail });
+  queueHistoryEntry(currentState, detail);
   markRenderDirty();
   scheduleHashUpdate();
 }
@@ -100,6 +111,17 @@ function updateState(nextState) {
 const scheduleHashUpdate = debounce(() => {
   updateLocationHash(currentState);
 }, 300);
+
+function queueHistoryEntry(state, detail) {
+  if (!detail || detail === 'Settings updated') {
+    pendingHistorySnapshot = null;
+    pendingHistoryDetail = '';
+    return;
+  }
+  pendingHistorySnapshot = cloneState(state);
+  pendingHistoryDetail = detail;
+  commitHistoryEntry();
+}
 
 function updateLocationHash(state) {
   const encoded = encodeStateToUrl(state);
@@ -227,12 +249,18 @@ function bindUi() {
 window.addEventListener('hashchange', () => {
   if (!controlPanel || !renderer) return;
   const state = decodeStateFromUrl(window.location.hash.slice(1));
-  if (state) {
-    currentState = state;
-    controlPanel.setState(state);
-    renderer.updateState(state);
-    markRenderDirty();
+  if (!state) {
+    return;
   }
+  if (currentState && stateFingerprint(state) === stateFingerprint(currentState)) {
+    return;
+  }
+  pendingHistorySnapshot = null;
+  pendingHistoryDetail = '';
+  currentState = state;
+  controlPanel.setState(state);
+  renderer.updateState(state);
+  markRenderDirty();
 });
 
 if ('serviceWorker' in navigator) {
