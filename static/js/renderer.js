@@ -1,3 +1,4 @@
+import { createCanvas2DContext } from './context.js';
 import { cloneState } from './state.js';
 import { clamp, downloadBlob, formatDimension, hslToRgb, toast } from './utils.js';
 
@@ -122,12 +123,9 @@ export class WallpaperRenderer {
   constructor(canvas, initialState) {
     this.canvas = canvas;
     this.state = cloneState(initialState);
-    this.canvas2d = this.canvas?.getContext('2d') ?? null;
-    if (!this.canvas2d) {
-      console.warn('Unable to initialize Canvas2D rendering context');
-    }
+    this.canvas2d = createCanvas2DContext(this.canvas);
     this.bufferCanvas = document.createElement('canvas');
-    this.bufferCtx = this.bufferCanvas.getContext('2d');
+    this.bufferCtx = createCanvas2DContext(this.bufferCanvas);
     this.previewZoom = 1;
     this.previewOffset = { x: 0, y: 0 };
     this.dragging = false;
@@ -228,7 +226,7 @@ export class WallpaperRenderer {
     if (this.bufferCanvas.width !== width || this.bufferCanvas.height !== height) {
       this.bufferCanvas.width = width;
       this.bufferCanvas.height = height;
-      this.bufferCtx = this.bufferCanvas.getContext('2d');
+      this.bufferCtx = createCanvas2DContext(this.bufferCanvas);
       this.wallpaperDirty = true;
     }
   }
@@ -273,9 +271,8 @@ export class WallpaperRenderer {
       ctx.restore();
       return;
     }
-    const ctx = targetCanvas.getContext('2d');
+    const ctx = createCanvas2DContext(targetCanvas);
     if (!ctx) {
-      console.warn('Canvas2D context unavailable for rendering');
       return;
     }
     ctx.save();
@@ -487,7 +484,10 @@ export class WallpaperRenderer {
     const canvas = document.createElement('canvas');
     canvas.width = state.canvas.width;
     canvas.height = state.canvas.height;
-    const ctx = canvas.getContext('2d');
+    const ctx = createCanvas2DContext(canvas);
+    if (!ctx) {
+      throw new Error('Canvas2D context unavailable for rendering');
+    }
     this.paintWallpaper(ctx, canvas.width, canvas.height, cloneState(state));
     const type = format === 'png' ? 'image/png' : format === 'webp' ? 'image/webp' : 'image/jpeg';
     const quality = format === 'jpg' ? state.output.jpgQuality : undefined;
