@@ -43,3 +43,16 @@ def test_history_entries_expose_actions():
     content = presets_path.read_text('utf-8')
     assert 'Reapply' in content
     assert 'Remove' in content
+
+
+def test_main_avoids_duplicate_hash_renders():
+    main_path = Path('static/js/main.js')
+    content = main_path.read_text('utf-8')
+    assert 'stateFingerprint(state) === stateFingerprint(currentState)' in content
+
+
+def test_main_coalesces_history_updates():
+    main_path = Path('static/js/main.js')
+    content = main_path.read_text('utf-8')
+    assert 'queueHistoryEntry' in content
+    assert 'pendingHistorySnapshot' in content
