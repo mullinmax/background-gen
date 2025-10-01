@@ -1,4 +1,4 @@
-import { MAX_GRADIENT_STOPS, cloneState, randomSeed } from './state.js';
+import { MAX_GRADIENT_STOPS, cloneState, randomSeed, defaultState } from './state.js';
 import { clamp, formatSeed, hslToRgb } from './utils.js';
 
 const GRADIENT_TYPES = ['none', 'linear', 'radial', 'conic', 'corner-glow'];
@@ -104,9 +104,20 @@ export class ControlPanel {
 
   createRenderingSection() {
     if (!this.state.rendering) {
-      this.state.rendering = { shader: 'classic', shaderStrength: 0.5 };
+      this.state.rendering = cloneState(defaultState.rendering);
     }
-    const section = this.createSection('Rendering');
+    if (typeof this.state.rendering.enabled !== 'boolean') {
+      this.state.rendering.enabled = true;
+    }
+    const section = this.createSection('Rendering', {
+      toggle: {
+        isEnabled: () => this.state.rendering.enabled !== false,
+        onToggle: (enabled) => {
+          this.state.rendering.enabled = enabled;
+          this.emitChange();
+        },
+      },
+    });
     const options = (this.shaderOptions.length
       ? this.shaderOptions
       : [{ id: 'classic', name: 'Classic Gradient', description: 'Baseline renderer.', default_strength: 0 }]
@@ -154,10 +165,25 @@ export class ControlPanel {
     this.shaderStrengthInput = rangeEl;
     this.shaderStrengthNumber = numberEl;
     section.body.append(strengthControl);
+    this.setSectionDisabled(section, this.state.rendering.enabled === false);
   }
 
   createGradientSection() {
-    const section = this.createSection('Gradient');
+    if (!this.state.gradient) {
+      this.state.gradient = cloneState(defaultState.gradient);
+    }
+    if (typeof this.state.gradient.enabled !== 'boolean') {
+      this.state.gradient.enabled = true;
+    }
+    const section = this.createSection('Gradient', {
+      toggle: {
+        isEnabled: () => this.state.gradient.enabled !== false,
+        onToggle: (enabled) => {
+          this.state.gradient.enabled = enabled;
+          this.emitChange();
+        },
+      },
+    });
     const palette = this.ensureGradientPalette();
     section.body.append(
       this.createSelect('Type', GRADIENT_TYPES, this.state.gradient.type, (value) => {
@@ -213,6 +239,7 @@ export class ControlPanel {
     this.stopContainer = stopContainer;
     this.addStopButton = addButton;
     this.renderGradientStops();
+    this.setSectionDisabled(section, this.state.gradient.enabled === false);
   }
 
   ensureGradientPalette() {
@@ -297,7 +324,21 @@ export class ControlPanel {
   }
 
   createGrainSection() {
-    const section = this.createSection('Grain');
+    if (!this.state.grain) {
+      this.state.grain = cloneState(defaultState.grain);
+    }
+    if (typeof this.state.grain.enabled !== 'boolean') {
+      this.state.grain.enabled = true;
+    }
+    const section = this.createSection('Grain', {
+      toggle: {
+        isEnabled: () => this.state.grain.enabled !== false,
+        onToggle: (enabled) => {
+          this.state.grain.enabled = enabled;
+          this.emitChange();
+        },
+      },
+    });
     section.body.append(
       this.createRangeInput('Amount', this.state.grain.amount, 0, 100, 1, (value) => {
         this.state.grain.amount = value;
@@ -336,14 +377,29 @@ export class ControlPanel {
         this.emitChange();
       }),
       this.createRangeInput('Protect Shadows', this.state.grain.protectShadows, 0, 0.2, 0.01, (value) => {
-        this.state.grain.protectShadows = value;
-        this.emitChange();
-      }, true)
+      this.state.grain.protectShadows = value;
+      this.emitChange();
+    }, true)
     );
+    this.setSectionDisabled(section, this.state.grain.enabled === false);
   }
 
   createVignetteSection() {
-    const section = this.createSection('Vignette');
+    if (!this.state.vignette) {
+      this.state.vignette = cloneState(defaultState.vignette);
+    }
+    if (typeof this.state.vignette.enabled !== 'boolean') {
+      this.state.vignette.enabled = true;
+    }
+    const section = this.createSection('Vignette', {
+      toggle: {
+        isEnabled: () => this.state.vignette.enabled !== false,
+        onToggle: (enabled) => {
+          this.state.vignette.enabled = enabled;
+          this.emitChange();
+        },
+      },
+    });
     section.body.append(
       this.createRangeInput('Strength', this.state.vignette.strength, 0, 1, 0.01, (value) => {
         this.state.vignette.strength = value;
@@ -362,10 +418,11 @@ export class ControlPanel {
         this.emitChange();
       }),
       this.createSelect('Mode', VIGNETTE_MODES, this.state.vignette.mode, (value) => {
-        this.state.vignette.mode = value;
-        this.emitChange();
-      })
+      this.state.vignette.mode = value;
+      this.emitChange();
+    })
     );
+    this.setSectionDisabled(section, this.state.vignette.enabled === false);
   }
 
   createRandomSection() {
@@ -426,28 +483,75 @@ export class ControlPanel {
     this.shaderDescriptionEl.textContent = option?.description ?? fallbacks[current] ?? 'Configure the shader pipeline for the background.';
   }
 
-  createSection(title) {
+  createSection(title, options = {}) {
     const id = `section-${this.sectionIdCounter++}`;
     const card = document.createElement('div');
     card.className = 'accordion-item bg-transparent text-light border-secondary';
     const header = document.createElement('h2');
     header.className = 'accordion-header';
+    const headerRow = document.createElement('div');
+    headerRow.className = 'd-flex align-items-center justify-content-between gap-2';
     const button = document.createElement('button');
     button.className = 'accordion-button collapsed bg-dark text-light';
     button.type = 'button';
     button.dataset.bsToggle = 'collapse';
     button.dataset.bsTarget = `#${id}`;
     button.textContent = title;
-    header.append(button);
+    headerRow.append(button);
     const bodyWrapper = document.createElement('div');
     bodyWrapper.id = id;
     bodyWrapper.className = 'accordion-collapse collapse';
     const body = document.createElement('div');
     body.className = 'accordion-body d-flex flex-column gap-3';
     bodyWrapper.append(body);
+    const section = { card, header, body, bodyWrapper };
+    if (options.toggle) {
+      const toggleWrapper = document.createElement('div');
+      toggleWrapper.className = 'form-check form-switch mb-0 section-toggle';
+      const toggleInput = document.createElement('input');
+      toggleInput.type = 'checkbox';
+      toggleInput.className = 'form-check-input';
+      toggleInput.id = `${id}-toggle`;
+      toggleInput.checked = options.toggle.isEnabled();
+      const toggleLabel = document.createElement('label');
+      toggleLabel.className = 'form-check-label small';
+      toggleLabel.setAttribute('for', toggleInput.id);
+      toggleLabel.textContent = options.toggle.label ?? 'Enabled';
+      toggleWrapper.append(toggleInput, toggleLabel);
+      toggleWrapper.addEventListener('click', (event) => event.stopPropagation());
+      toggleInput.addEventListener('change', () => {
+        const enabled = toggleInput.checked;
+        options.toggle.onToggle(enabled);
+        this.setSectionDisabled(section, !enabled);
+      });
+      headerRow.append(toggleWrapper);
+    }
+    header.append(headerRow);
     card.append(header, bodyWrapper);
     this.accordionRoot.append(card);
-    return { card, header, body, bodyWrapper };
+    return section;
+  }
+
+  setSectionDisabled(section, disabled) {
+    const isDisabled = Boolean(disabled);
+    section.card.classList.toggle('section-disabled', isDisabled);
+    section.body.setAttribute('aria-disabled', String(isDisabled));
+    const controls = section.body.querySelectorAll('input, select, textarea, button');
+    controls.forEach((control) => {
+      if (isDisabled) {
+        if (control.disabled) {
+          control.dataset.sectionToggleDisabled = 'preserve';
+        } else {
+          control.dataset.sectionToggleDisabled = 'toggle';
+          control.disabled = true;
+        }
+      } else {
+        if (control.dataset.sectionToggleDisabled === 'toggle') {
+          control.disabled = false;
+        }
+        delete control.dataset.sectionToggleDisabled;
+      }
+    });
   }
 
   createRangeInput(label, value, min, max, step, onChange, showAsPercent = false) {

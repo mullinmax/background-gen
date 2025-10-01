@@ -238,10 +238,18 @@ function bindUi() {
     });
   }
 
-  togglePresets.addEventListener('click', () => {
-    const panel = document.getElementById('presets-panel');
-    panel.classList.toggle('d-none');
-  });
+  if (togglePresets) {
+    togglePresets.setAttribute('aria-controls', 'presets-panel');
+    togglePresets.setAttribute('aria-expanded', 'true');
+    togglePresets.textContent = 'Hide';
+    togglePresets.addEventListener('click', () => {
+      const panel = document.getElementById('presets-panel');
+      if (!panel) return;
+      const collapsed = panel.classList.toggle('collapsed');
+      togglePresets.textContent = collapsed ? 'Show' : 'Hide';
+      togglePresets.setAttribute('aria-expanded', String(!collapsed));
+    });
+  }
 
   updateDownloadAvailability();
 }

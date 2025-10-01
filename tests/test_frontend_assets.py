@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 
 def test_context_helper_is_canvas_only():
@@ -38,6 +39,13 @@ def test_controls_sections_allow_multiple_open():
     assert 'dataset.bsParent' not in content
 
 
+def test_controls_sections_expose_effect_toggles():
+    controls_path = Path('static/js/controls.js')
+    content = controls_path.read_text('utf-8')
+    assert 'section-toggle' in content
+    assert 'setSectionDisabled' in content
+
+
 def test_history_entries_expose_actions():
     presets_path = Path('static/js/presets.js')
     content = presets_path.read_text('utf-8')
@@ -56,3 +64,27 @@ def test_main_coalesces_history_updates():
     content = main_path.read_text('utf-8')
     assert 'queueHistoryEntry' in content
     assert 'pendingHistorySnapshot' in content
+
+
+def test_default_state_includes_effect_toggles():
+    state_path = Path('static/js/state.js')
+    content = state_path.read_text('utf-8')
+    for section in ('rendering', 'gradient', 'grain', 'vignette'):
+        pattern = rf"{section}:\s*{{.*?enabled:\s*true"
+        assert re.search(pattern, content, flags=re.DOTALL), f"{section} section should default to enabled"
+
+
+def test_renderer_honors_effect_toggles():
+    renderer_path = Path('static/js/renderer.js')
+    content = renderer_path.read_text('utf-8')
+    assert 'state.rendering?.enabled' in content
+    assert 'state.gradient?.enabled' in content
+    assert 'state.grain?.enabled' in content
+    assert 'vignetteState?.enabled' in content
+
+
+def test_presets_panel_toggle_preserves_button():
+    main_path = Path('static/js/main.js')
+    content = main_path.read_text('utf-8')
+    assert "panel.classList.toggle('collapsed')" in content
+    assert "togglePresets.textContent = collapsed ? 'Show' : 'Hide'" in content

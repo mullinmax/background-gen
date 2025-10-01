@@ -4,10 +4,12 @@ export const defaultState = Object.freeze({
   canvas: { width: 1920, height: 1080, previewScale: 0.5 },
   color: { hue: 210, saturation: 0.55, lightness: 0.45, gamma: 1.0 },
   rendering: {
+    enabled: true,
     shader: 'classic',
     shaderStrength: 0.5,
   },
   gradient: {
+    enabled: true,
     type: 'radial',
     mode: 'continuous',
     angle: 45,
@@ -21,6 +23,7 @@ export const defaultState = Object.freeze({
     blend: 'overlay',
   },
   grain: {
+    enabled: true,
     amount: 35,
     size: 'normal',
     algorithm: 'fbm',
@@ -31,7 +34,7 @@ export const defaultState = Object.freeze({
     intensityCurve: 's-curve',
     protectShadows: 0.05,
   },
-  vignette: { strength: 0.4, radius: 0.8, feather: 0.6, roundness: 1.0, mode: 'multiply' },
+  vignette: { enabled: true, strength: 0.4, radius: 0.8, feather: 0.6, roundness: 1.0, mode: 'multiply' },
   random: { seed: Math.floor(Math.random() * 2 ** 32) >>> 0 },
   output: { format: 'png', jpgQuality: 0.92, embedMetadata: true },
 });
