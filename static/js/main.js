@@ -1,6 +1,6 @@
 import { ControlPanel } from './controls.js';
 import { PresetManager } from './presets.js';
-import { WallpaperRenderer, downloadWallpaper } from './renderer.js';
+import { WallpaperRenderer } from './renderer.js';
 import {
   cloneState,
   defaultState,
@@ -8,8 +8,9 @@ import {
   encodeStateToUrl,
   normalizeState,
   serializeState,
+  stateFingerprint,
 } from './state.js';
-import { debounce, downloadBlob, fileToText, toast } from './utils.js';
+import { debounce, downloadBlob, fileToText, formatDimension, toast } from './utils.js';
 
 const accordionRoot = document.getElementById('controls-accordion');
 const controlsPanel = document.getElementById('controls-panel');
@@ -17,12 +18,19 @@ const presetsList = document.getElementById('presets-list');
 const historyList = document.getElementById('history-list');
 const togglePresets = document.getElementById('toggle-presets');
 const previewCanvas = document.getElementById('preview-canvas');
+const renderButton = document.getElementById('render-button');
+const downloadButton = document.getElementById('download-button');
+const renderStatus = document.getElementById('render-status');
 
 let currentState = null;
 let renderer = null;
 let controlPanel = null;
 let presets = null;
 let shaderOptions = [];
+let lastRenderResult = null;
+let renderDirty = true;
+let isRendering = false;
+let autoRenderHandle = null;
 
 bootstrap();
 
@@ -35,6 +43,7 @@ async function bootstrap() {
     updateState(state);
     controlPanel.setState(state);
     renderer.updateState(state);
+    markRenderDirty();
     updateLocationHash(state);
   });
 
@@ -42,6 +51,9 @@ async function bootstrap() {
   presets.addHistory('Initial', currentState);
 
   bindUi();
+  setRenderStatus('Render pending', 'secondary');
+  markRenderDirty();
+  await ensureRender({ showSuccessToast: false });
   updateLocationHash(currentState);
 }
 
@@ -75,6 +87,7 @@ function handleStateChange(nextState) {
   updateState(nextState);
   renderer.updateState(nextState);
   presets.addHistory('Adjusted', nextState);
+  markRenderDirty();
   scheduleHashUpdate();
 }
 
@@ -97,6 +110,7 @@ function bindUi() {
     controlPanel.setState(currentState);
     renderer.updateState(currentState);
     toast('Settings reset to defaults', 'warning');
+    markRenderDirty();
     scheduleHashUpdate();
   });
 
@@ -125,6 +139,7 @@ function bindUi() {
       controlPanel.setState(state);
       renderer.updateState(state);
       toast('Preset imported', 'success');
+      markRenderDirty();
       updateLocationHash(state);
     } catch (error) {
       console.error(error);
@@ -132,14 +147,42 @@ function bindUi() {
     }
   });
 
-  document.getElementById('download-button').addEventListener('click', async () => {
-    await downloadWallpaper(renderer, currentState);
-  });
+  if (renderButton) {
+    renderButton.addEventListener('click', () => {
+      performRender({ notifyBusy: true });
+    });
+  }
+
+  if (downloadButton) {
+    downloadButton.addEventListener('click', async () => {
+      const needsRender = renderDirty || !lastRenderMatchesCurrent();
+      const rendered = await ensureRender({
+        showSuccessToast: needsRender,
+        successMessage: 'Render complete — starting download',
+      });
+      if (!rendered) {
+        return;
+      }
+      if (!lastRenderResult) {
+        toast('No rendered wallpaper is available', 'danger');
+        return;
+      }
+      const { blob, state } = lastRenderResult;
+      const extension = state.output.format === 'jpg' ? 'jpg' : state.output.format;
+      const filename = `wall_${formatDimension(state.canvas.width, state.canvas.height)}_${state.random.seed}.${extension}`;
+      downloadBlob(blob, filename);
+      if (!needsRender) {
+        toast('Download started', 'success');
+      }
+    });
+  }
 
   togglePresets.addEventListener('click', () => {
     const panel = document.getElementById('presets-panel');
     panel.classList.toggle('d-none');
   });
+
+  updateDownloadAvailability();
 }
 
 window.addEventListener('hashchange', () => {
@@ -149,6 +192,7 @@ window.addEventListener('hashchange', () => {
     currentState = state;
     controlPanel.setState(state);
     renderer.updateState(state);
+    markRenderDirty();
   }
 });
 
@@ -158,4 +202,99 @@ if ('serviceWorker' in navigator) {
       .register('/service-worker.js')
       .catch((error) => console.warn('Service worker registration failed', error));
   });
+}
+
+function markRenderDirty() {
+  renderDirty = true;
+  scheduleAutoRender();
+  if (!isRendering) {
+    setRenderStatus('Changes pending render', 'warning');
+  }
+  updateDownloadAvailability();
+}
+
+function lastRenderMatchesCurrent() {
+  if (!lastRenderResult) return false;
+  return lastRenderResult.fingerprint === stateFingerprint(currentState);
+}
+
+function updateDownloadAvailability() {
+  if (!downloadButton) return;
+  const ready = !renderDirty && lastRenderMatchesCurrent();
+  downloadButton.disabled = isRendering || !ready;
+  downloadButton.title = ready ? 'Download the most recent render' : 'Render the wallpaper before downloading';
+}
+
+function scheduleAutoRender() {
+  if (autoRenderHandle) {
+    clearTimeout(autoRenderHandle);
+  }
+  autoRenderHandle = setTimeout(() => {
+    ensureRender({ showSuccessToast: false });
+  }, 800);
+}
+
+function setRenderStatus(message, tone = 'secondary') {
+  if (!renderStatus) return;
+  const toneClass = tone === 'secondary' ? 'text-secondary' : `text-${tone}`;
+  renderStatus.className = `small ${toneClass}`;
+  renderStatus.textContent = message;
+}
+
+function setRenderButtonBusy(busy) {
+  if (renderButton) {
+    renderButton.disabled = busy;
+    renderButton.textContent = busy ? 'Rendering…' : 'Render';
+  }
+  updateDownloadAvailability();
+}
+
+async function performRender({ showSuccessToast = true, successMessage = 'Render complete', showErrorToast = true, notifyBusy = false } = {}) {
+  if (!renderer) return false;
+  if (isRendering) {
+    if (notifyBusy) {
+      toast('A render is already in progress', 'info');
+    }
+    return false;
+  }
+  if (autoRenderHandle) {
+    clearTimeout(autoRenderHandle);
+    autoRenderHandle = null;
+  }
+  isRendering = true;
+  setRenderButtonBusy(true);
+  setRenderStatus('Rendering…', 'info');
+  updateDownloadAvailability();
+  const snapshot = cloneState(currentState);
+  const fingerprint = stateFingerprint(snapshot);
+  const format = snapshot.output.format;
+  try {
+    const blob = await renderer.renderToBlob(snapshot, format);
+    lastRenderResult = { blob, state: snapshot, fingerprint };
+    renderDirty = false;
+    if (showSuccessToast) {
+      toast(successMessage, 'success');
+    }
+    setRenderStatus('Render up to date', 'success');
+    return true;
+  } catch (error) {
+    console.error(error);
+    renderDirty = true;
+    if (showErrorToast) {
+      toast('Failed to render wallpaper', 'danger');
+    }
+    setRenderStatus('Render failed', 'danger');
+    return false;
+  } finally {
+    isRendering = false;
+    setRenderButtonBusy(false);
+    updateDownloadAvailability();
+  }
+}
+
+async function ensureRender(options = {}) {
+  if (!renderDirty && lastRenderMatchesCurrent()) {
+    return true;
+  }
+  return performRender(options);
 }

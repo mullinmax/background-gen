@@ -289,7 +289,7 @@ export class WallpaperRenderer {
     const baseHue = state.color.hue;
     const baseSat = state.color.saturation * 100;
     const baseLight = state.color.lightness * 100;
-    ctx.fillStyle = `hsl(${baseHue} ${baseSat}% ${baseLight}%)`;
+    ctx.fillStyle = `hsl(${baseHue}, ${baseSat}%, ${baseLight}%)`;
     ctx.fillRect(0, 0, width, height);
     const palette = this.getGradientPalette(state);
     if (state.gradient.type !== 'none') {
@@ -438,7 +438,7 @@ export class WallpaperRenderer {
     const lightness = clamp(palette.lightness + stop.lightnessDelta, 0, 1);
     const saturation = clamp(palette.saturation, 0, 1);
     const opacity = clamp(stop.opacity, 0, 1);
-    return `hsla(${hue} ${(saturation * 100).toFixed(0)}% ${(lightness * 100).toFixed(0)}%, ${opacity})`;
+    return `hsla(${hue}, ${(saturation * 100).toFixed(0)}%, ${(lightness * 100).toFixed(0)}%, ${opacity})`;
   }
 
   applyNoise(ctx, width, height, state) {
