@@ -174,6 +174,7 @@ export class WallpaperRenderer {
     this.canvas = canvas;
     this.state = cloneState(initialState);
     this.gl = this.createContext();
+    this.canvas2d = null;
     this.blueNoiseTexture = null;
     this.previewZoom = 1;
     this.previewOffset = { x: 0, y: 0 };
@@ -199,16 +200,30 @@ export class WallpaperRenderer {
         await this.loadBlueNoise();
       } catch (error) {
         console.error(error);
-        this.gl = null;
-        this.canvas.getContext('2d');
-        document.getElementById('webgl-warning')?.classList.remove('d-none');
+        this.enableCanvasFallback();
       }
     } else {
-      document.getElementById('webgl-warning')?.classList.remove('d-none');
+      this.enableCanvasFallback();
     }
     this.attachEvents();
     this.handleResize();
     this.startLoop();
+  }
+
+  enableCanvasFallback() {
+    if (this.gl) {
+      const loseContext = this.gl.getExtension?.('WEBGL_lose_context');
+      loseContext?.loseContext();
+    }
+    this.gl = null;
+    if (!this.canvas2d) {
+      this.canvas2d = this.canvas?.getContext('2d');
+      if (!this.canvas2d) {
+        console.warn('Unable to initialize Canvas2D fallback context');
+      }
+    }
+    document.getElementById('webgl-warning')?.classList.remove('d-none');
+    this.needsRender = true;
   }
 
   setupWebGL() {
@@ -435,7 +450,19 @@ export class WallpaperRenderer {
   }
 
   renderCanvasFallback(targetCanvas = this.canvas, stateOverride = this.state) {
-    const ctx = targetCanvas.getContext('2d');
+    let ctx = null;
+    if (targetCanvas === this.canvas && this.canvas2d) {
+      ctx = this.canvas2d;
+    } else {
+      ctx = targetCanvas.getContext('2d');
+      if (targetCanvas === this.canvas && ctx && !this.canvas2d) {
+        this.canvas2d = ctx;
+      }
+    }
+    if (!ctx) {
+      console.warn('Canvas2D context unavailable for fallback rendering');
+      return;
+    }
     const state = stateOverride;
     const width = targetCanvas.width;
     const height = targetCanvas.height;
