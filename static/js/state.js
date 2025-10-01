@@ -3,12 +3,17 @@ export const MAX_GRADIENT_STOPS = 8;
 export const defaultState = Object.freeze({
   canvas: { width: 1920, height: 1080, previewScale: 0.5 },
   color: { hue: 210, saturation: 0.55, lightness: 0.45, gamma: 1.0 },
+  rendering: {
+    shader: 'classic',
+    shaderStrength: 0.5,
+  },
   gradient: {
     type: 'radial',
     mode: 'continuous',
     angle: 45,
     center: { x: 0.5, y: 0.5 },
     scale: 1.0,
+    palette: { hue: 210, saturation: 0.6, lightness: 0.5 },
     stops: [
       { pos: 0.0, hueShift: 0.0, lightnessDelta: 0.0, opacity: 1.0 },
       { pos: 1.0, hueShift: 30.0, lightnessDelta: 0.25, opacity: 0.6 },
@@ -31,12 +36,10 @@ export const defaultState = Object.freeze({
   output: { format: 'png', jpgQuality: 0.92, embedMetadata: true },
 });
 
+export { clamp } from './utils.js';
+
 export function cloneState(state) {
   return structuredClone(state);
-}
-
-export function clamp(value, min, max) {
-  return Math.min(Math.max(value, min), max);
 }
 
 export function randomSeed() {

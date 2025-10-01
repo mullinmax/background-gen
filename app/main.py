@@ -1,6 +1,7 @@
 """FastAPI application for the wallpaper generator."""
 from __future__ import annotations
 
+import base64
 import json
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -12,7 +13,26 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import Settings, get_settings
+from .shaders import SHADER_VARIANTS
 from .telemetry import TelemetryEvent, TelemetryStore
+
+
+FAVICON_BYTES = base64.b64decode(
+    (
+        "AAABAAEAEBAAAAEAIABoBAAAFgAAACgAAAAQAAAAIAAAAAEAIAAAAAAAQAQAAAAAAAAAAAAAAAAAAAAAAADikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQ"
+        "Sv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQ"
+        "Sv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQ"
+        "Sv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQ"
+        "Sv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQ"
+        "Sv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQ"
+        "Sv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQ"
+        "Sv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQ"
+        "Sv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQ"
+        "Sv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQ"
+        "Sv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQ"
+        "Sv/ikEr/4pBK/+KQSv/ikEr/4pBK/+KQSv/ikEr/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+    )
+)
 
 
 def _ensure_static_root(path: Path) -> Path:
@@ -88,6 +108,14 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         if not sw_path.exists():
             raise HTTPException(status_code=404, detail="Service worker not found")
         return FileResponse(sw_path, media_type="application/javascript")
+
+    @app.get("/favicon.ico")
+    async def favicon() -> Response:
+        return Response(content=FAVICON_BYTES, media_type="image/x-icon")
+
+    @app.get("/api/shaders")
+    async def shaders() -> Response:
+        return JSONResponse(content=SHADER_VARIANTS)
 
     @app.post("/api/telemetry")
     async def telemetry(request: Request, current_settings: Settings = Depends(get_settings)) -> Dict[str, Any]:
