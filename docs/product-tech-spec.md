@@ -1,7 +1,7 @@
 # Minimal, Modular Wallpaper Generator — Product & Technical Specification
 
 ## Overview
-The Minimal, Modular Wallpaper Generator is a single-page, client-rendered web application for generating deterministic, high-quality abstract wallpapers. The core experience is a responsive control panel that drives a WebGL2 rendering pipeline, enabling users to tweak gradients, grain, and vignette effects and export the results at arbitrary resolutions. A lightweight FastAPI service delivers static assets and optional telemetry endpoints, keeping server load minimal.
+The Minimal, Modular Wallpaper Generator is a single-page, client-rendered web application for generating deterministic, high-quality abstract wallpapers. The core experience is a responsive control panel that drives a Canvas2D rendering pipeline, enabling users to tweak gradients, grain, and vignette effects and export the results at arbitrary resolutions. A lightweight FastAPI service delivers static assets and optional telemetry endpoints, keeping server load minimal.
 
 ## Primary User Flows
 1. **Configure appearance controls.** Users adjust color, gradient, grain, vignette, and random seed parameters through labeled, keyboard-accessible inputs.
@@ -60,21 +60,19 @@ The Minimal, Modular Wallpaper Generator is a single-page, client-rendered web a
 - Accessibility: keyboard navigation, labeled inputs, sliders paired with numeric fields.
 
 ## Rendering Pipeline (Client)
-- Prefer WebGL2 fragment shaders; fall back to Canvas2D when unavailable (with feature warnings).
-- Modular pass graph orchestrated via declarative configuration:
-  1. **BasePass:** Convert HSL to linear RGB and fill base layer.
-  2. **GradientPass:** Apply selected gradient type and mode; blend using configured mode.
-  3. **NoisePass:** Generate seeded noise using selected algorithm; map through intensity curve, apply chroma and protect-shadows adjustments, then composite (add/overlay).
-  4. **VignettePass:** Apply radial mask with roundness and feather options via multiply or soft-light.
-  5. **DitherPass (optional for JPEG):** Apply ordered or blue-noise dithering to reduce banding.
-  6. **Encode:** Read pixels into `ImageBitmap`/`Blob`, trigger download with deterministic filename.
-- Deterministic seeding via 32-bit PRNG (e.g., Mulberry32/xoshiro). Seed stored in UI and metadata.
+- Pure Canvas2D implementation composed of sequential paint passes:
+  1. **BaseFill:** Convert HSL controls to RGB and fill the canvas background.
+  2. **GradientPass:** Build CSS gradients for linear, radial, conic, and corner-glow modes; composite using the configured blend mode.
+  3. **VariantPass:** Apply stylistic overlays (lumina, nocturne, ember) via additional gradients and blend operations.
+  4. **NoisePass:** Scatter seeded luminance noise using a deterministic PRNG; optionally extend to more algorithms as future work.
+  5. **VignettePass:** Draw radial vignette with configurable strength, radius, feather, and blend mode.
+  6. **Encode:** Use `HTMLCanvasElement.toBlob` to produce PNG/WebP/JPEG output with deterministic filenames.
+- Deterministic seeding via 32-bit PRNG (Mulberry32). Seed stored in UI and metadata.
 
-### Shader Modularity Strategy
-- GLSL snippets provide reusable utilities (PRNG, color conversion, noise functions).
-- Noise libraries (value, Perlin, Simplex, FBM) compiled conditionally into fragment programs.
-- Each pass renders to its own FBO; buffers reused to minimize memory.
-- Alternate CPU/Web Worker path considered if shader modularity becomes too complex.
+### Canvas Rendering Strategy
+- Canvas gradients and blend modes approximate shader results while remaining CPU-friendly.
+- Off-screen canvas caches the full-resolution wallpaper; the preview samples from this buffer with pan/zoom transforms.
+- Metadata embedding occurs post-encode for PNG/WebP outputs.
 
 ## State & Shareability
 - Application state serialized as JSON (see schema below).
@@ -120,7 +118,7 @@ The Minimal, Modular Wallpaper Generator is a single-page, client-rendered web a
 - Efficient GPU memory usage via buffer reuse and compact pass graph.
 
 ## FastAPI Backend (Minimal)
-- Serves static assets (index, JS, CSS, shader files, presets JSON).
+- Serves static assets (index, JS, CSS, presets JSON).
 - Endpoints:
   - `GET /api/health` → status JSON.
   - `POST /api/telemetry` (optional) → anonymous usage stats with rate limiting.
@@ -131,8 +129,8 @@ The Minimal, Modular Wallpaper Generator is a single-page, client-rendered web a
 - Provide caching headers for hashed static assets and enable same-origin CORS.
 
 ## Offline & Resilience (Optional)
-- Service worker caches static assets and last-used shaders for offline use.
-- Canvas2D fallback when WebGL2 is unavailable, with user warning about limited algorithms.
+- Service worker caches static assets and last-used presets for offline use.
+- Canvas2D renderer works across devices without requiring GPU extensions.
 
 ## Docker & Deployment
 - Single container image running FastAPI (Uvicorn) with static file serving.
@@ -142,17 +140,17 @@ The Minimal, Modular Wallpaper Generator is a single-page, client-rendered web a
 ## Testing & QA
 - Visual regression: deterministic renders validated via hash/SSIM comparisons for known seeds.
 - Performance benchmarks for preview and full render paths.
-- Cross-browser verification (Chrome, Firefox, Safari) with WebGL2 capability checks.
+- Cross-browser verification (Chrome, Firefox, Safari) ensuring Canvas2D feature parity.
 
 ## Extensibility (Post-MVP)
-- Additional shader passes for geometric overlays and pattern libraries.
+- Additional Canvas paint passes for geometric overlays and pattern libraries.
 - Batch rendering interface for seed variations.
 - Palette extraction from uploaded images.
 - Public presets gallery and share link enhancements.
 
 ## Risks & Mitigations
-- **Shader complexity:** Maintain small, orthogonal shader utilities and declarative pass graph.
-- **Blue-noise quality/performance:** Tile high-quality textures, scramble indices by seed, and cache on GPU.
+- **Canvas performance:** Keep paint passes simple, reuse off-screen buffers, and avoid per-frame allocations.
+- **Noise quality/performance:** Balance sample counts with perceived grain intensity; precompute reusable patterns if needed.
 - **Large output sizes:** Render final output in a single pass at target size; avoid dynamic resizing.
 
 ## Success Criteria

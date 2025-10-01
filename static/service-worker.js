@@ -1,4 +1,4 @@
-const CACHE_NAME = 'wallpaper-generator-v1';
+const CACHE_NAME = 'wallpaper-generator-v2';
 const ASSETS = [
   '/',
   '/static/index.html',
@@ -9,7 +9,6 @@ const ASSETS = [
   '/static/js/utils.js',
   '/static/js/renderer.js',
   '/static/js/presets.js',
-  '/static/js/webgl/shaders.js',
   '/static/presets.json',
 ];
 
