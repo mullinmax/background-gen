@@ -48,7 +48,7 @@ async function bootstrap() {
   });
 
   presets.loadPresets();
-  presets.addHistory('Initial', currentState);
+  presets.addHistory('Initial', currentState, { detail: 'Starting point' });
 
   bindUi();
   setRenderStatus('Render pending', 'secondary');
@@ -84,9 +84,11 @@ function initState() {
 }
 
 function handleStateChange(nextState) {
+  const previousState = currentState ? cloneState(currentState) : null;
   updateState(nextState);
   renderer.updateState(nextState);
-  presets.addHistory('Adjusted', nextState);
+  const detail = summarizeStateChange(previousState, currentState);
+  presets.addHistory('Adjusted', currentState, { detail });
   markRenderDirty();
   scheduleHashUpdate();
 }
@@ -102,6 +104,43 @@ const scheduleHashUpdate = debounce(() => {
 function updateLocationHash(state) {
   const encoded = encodeStateToUrl(state);
   window.location.hash = encoded;
+}
+
+function summarizeStateChange(previousState, nextState) {
+  if (!previousState || !nextState) {
+    return 'Settings updated';
+  }
+
+  const sectionLabels = [
+    ['canvas', 'Canvas'],
+    ['color', 'Color'],
+    ['rendering', 'Rendering'],
+    ['gradient', 'Gradient'],
+    ['grain', 'Grain'],
+    ['vignette', 'Vignette'],
+    ['random', 'Randomness'],
+    ['output', 'Output'],
+  ];
+
+  const changedSections = sectionLabels
+    .filter(([key]) => JSON.stringify(previousState[key]) !== JSON.stringify(nextState[key]))
+    .map(([, label]) => label);
+
+  if (changedSections.length === 0) {
+    return 'Settings updated';
+  }
+
+  if (changedSections.length === 1) {
+    return `${changedSections[0]} settings adjusted`;
+  }
+
+  if (changedSections.length === 2) {
+    return `${changedSections[0]} & ${changedSections[1]} settings adjusted`;
+  }
+
+  const initial = changedSections.slice(0, -1).join(', ');
+  const last = changedSections[changedSections.length - 1];
+  return `${initial}, & ${last} settings adjusted`;
 }
 
 function bindUi() {

@@ -442,7 +442,6 @@ export class ControlPanel {
     const bodyWrapper = document.createElement('div');
     bodyWrapper.id = id;
     bodyWrapper.className = 'accordion-collapse collapse';
-    bodyWrapper.dataset.bsParent = '#controls-accordion';
     const body = document.createElement('div');
     body.className = 'accordion-body d-flex flex-column gap-3';
     bodyWrapper.append(body);
