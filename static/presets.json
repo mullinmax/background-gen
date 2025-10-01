@@ -1,0 +1,106 @@
+[
+  {
+    "id": "soft-dawn",
+    "name": "Soft Dawn",
+    "settings": {
+      "canvas": { "width": 2560, "height": 1440, "previewScale": 0.5 },
+      "color": { "hue": 28, "saturation": 0.55, "lightness": 0.45, "gamma": 1.1 },
+      "gradient": {
+        "type": "linear",
+        "mode": "continuous",
+        "angle": 35,
+        "center": { "x": 0.5, "y": 0.5 },
+        "scale": 1,
+        "stops": [
+          { "pos": 0, "hueShift": -10, "lightnessDelta": -0.2, "opacity": 0.95 },
+          { "pos": 1, "hueShift": 35, "lightnessDelta": 0.3, "opacity": 0.6 }
+        ],
+        "blend": "overlay"
+      },
+      "grain": {
+        "amount": 25,
+        "size": "fine",
+        "algorithm": "blue-noise",
+        "octaves": 4,
+        "lacunarity": 2,
+        "gain": 0.5,
+        "chroma": { "enabled": false, "intensity": 0.05 },
+        "intensityCurve": "s-curve",
+        "protectShadows": 0.03
+      },
+      "vignette": { "strength": 0.3, "radius": 0.85, "feather": 0.65, "roundness": 1.2, "mode": "soft-light" },
+      "random": { "seed": 123456789 },
+      "output": { "format": "png", "jpgQuality": 0.9, "embedMetadata": true }
+    }
+  },
+  {
+    "id": "monochrome-wash",
+    "name": "Monochrome Wash",
+    "settings": {
+      "canvas": { "width": 1920, "height": 1200, "previewScale": 0.6 },
+      "color": { "hue": 210, "saturation": 0.1, "lightness": 0.4, "gamma": 1 },
+      "gradient": {
+        "type": "radial",
+        "mode": "discrete",
+        "angle": 0,
+        "center": { "x": 0.47, "y": 0.52 },
+        "scale": 1.2,
+        "stops": [
+          { "pos": 0, "hueShift": 0, "lightnessDelta": -0.15, "opacity": 1 },
+          { "pos": 0.45, "hueShift": 0, "lightnessDelta": -0.05, "opacity": 0.8 },
+          { "pos": 0.75, "hueShift": 0, "lightnessDelta": 0.08, "opacity": 0.5 },
+          { "pos": 1, "hueShift": 0, "lightnessDelta": 0.12, "opacity": 0.35 }
+        ],
+        "blend": "soft-light"
+      },
+      "grain": {
+        "amount": 60,
+        "size": "coarse",
+        "algorithm": "poisson-stipple",
+        "octaves": 3,
+        "lacunarity": 1.7,
+        "gain": 0.6,
+        "chroma": { "enabled": true, "intensity": 0.12 },
+        "intensityCurve": "log",
+        "protectShadows": 0.08
+      },
+      "vignette": { "strength": 0.45, "radius": 0.7, "feather": 0.7, "roundness": 1.0, "mode": "multiply" },
+      "random": { "seed": 987654321 },
+      "output": { "format": "png", "jpgQuality": 0.85, "embedMetadata": true }
+    }
+  },
+  {
+    "id": "deep-space",
+    "name": "Deep Space",
+    "settings": {
+      "canvas": { "width": 3440, "height": 1440, "previewScale": 0.4 },
+      "color": { "hue": 240, "saturation": 0.6, "lightness": 0.25, "gamma": 1.15 },
+      "gradient": {
+        "type": "corner-glow",
+        "mode": "continuous",
+        "angle": 120,
+        "center": { "x": 0.2, "y": 0.2 },
+        "scale": 1.8,
+        "stops": [
+          { "pos": 0, "hueShift": 45, "lightnessDelta": 0.3, "opacity": 1 },
+          { "pos": 1, "hueShift": -30, "lightnessDelta": -0.4, "opacity": 0.7 }
+        ],
+        "blend": "screen"
+      },
+      "grain": {
+        "amount": 40,
+        "size": "fine",
+        "algorithm": "paper-fiber",
+        "octaves": 5,
+        "lacunarity": 2.3,
+        "gain": 0.55,
+        "chroma": { "enabled": true, "intensity": 0.1 },
+        "intensityCurve": "linear",
+        "protectShadows": 0.02
+      },
+      "vignette": { "strength": 0.6, "radius": 0.65, "feather": 0.5, "roundness": 0.8, "mode": "multiply" },
+      "random": { "seed": 42641234 },
+      "output": { "format": "png", "jpgQuality": 0.95, "embedMetadata": true }
+    }
+  }
+]

@@ -1,0 +1,89 @@
+body {
+  min-height: 100vh;
+}
+
+.preview-wrapper {
+  background: #111;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0.5rem;
+  overflow: hidden;
+  min-height: 400px;
+}
+
+#preview-canvas {
+  display: block;
+  aspect-ratio: 16 / 9;
+}
+
+#controls-panel,
+#presets-panel {
+  max-height: calc(100vh - 3rem);
+  overflow-y: auto;
+  padding-right: 0.5rem;
+}
+
+.list-group-item {
+  cursor: pointer;
+}
+
+.list-group-item.active {
+  background-color: rgba(13, 110, 253, 0.3);
+  border-color: rgba(13, 110, 253, 0.5);
+}
+
+input[type="color"] {
+  height: 2.2rem;
+  width: 100%;
+  padding: 0;
+}
+
+.slider-input {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.slider-input input[type="range"] {
+  flex: 1 1 auto;
+}
+
+.slider-input input[type="number"] {
+  width: 5rem;
+}
+
+.stop-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.stop-item {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 0.5rem;
+  padding: 0.5rem;
+}
+
+.stop-item .form-control {
+  font-size: 0.85rem;
+}
+
+.stop-item .btn {
+  font-size: 0.75rem;
+}
+
+#webgl-warning {
+  position: absolute;
+  inset: 1rem;
+}
+
+@media (max-width: 991px) {
+  #controls-panel,
+  #presets-panel {
+    max-height: none;
+    padding-right: 0;
+  }
+
+  #preview-canvas {
+    aspect-ratio: 1 / 1;
+  }
+}
