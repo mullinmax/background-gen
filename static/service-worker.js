@@ -5,6 +5,7 @@ const ASSETS = [
   '/static/css/app.css',
   '/static/js/main.js',
   '/static/js/controls.js',
+  '/static/js/context.js',
   '/static/js/state.js',
   '/static/js/utils.js',
   '/static/js/renderer.js',
