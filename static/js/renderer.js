@@ -1,9 +1,7 @@
-import { cloneState, MAX_GRADIENT_STOPS } from './state.js';
-import { createFragmentShaderSource, vertexShaderSource } from './webgl/shaders.js';
-import { downloadBlob, formatDimension, hslToRgb, toast } from './utils.js';
+import { cloneState } from './state.js';
+import { clamp, downloadBlob, formatDimension, hslToRgb, toast } from './utils.js';
 
 const DPR = () => window.devicePixelRatio || 1;
-const BLUE_NOISE_SEED = 0x9e3779b9;
 
 function createPrng(seed) {
   let t = seed >>> 0;
@@ -14,55 +12,6 @@ function createPrng(seed) {
     x ^= x + Math.imul(x ^ (x >>> 7), x | 61);
     return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
   };
-}
-
-function createQuad(gl) {
-  const buffer = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-  const vertices = new Float32Array([
-    -1, -1,
-    1, -1,
-    -1, 1,
-    -1, 1,
-    1, -1,
-    1, 1,
-  ]);
-  gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
-  return buffer;
-}
-
-function compileShader(gl, type, source) {
-  const shader = gl.createShader(type);
-  gl.shaderSource(shader, source);
-  gl.compileShader(shader);
-  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-    const log = gl.getShaderInfoLog(shader);
-    gl.deleteShader(shader);
-    throw new Error(`Shader compile error: ${log}`);
-  }
-  return shader;
-}
-
-function createProgram(gl, vsSource, fsSource) {
-  const vs = compileShader(gl, gl.VERTEX_SHADER, vsSource);
-  const fs = compileShader(gl, gl.FRAGMENT_SHADER, fsSource);
-  const program = gl.createProgram();
-  gl.attachShader(program, vs);
-  gl.attachShader(program, fs);
-  gl.bindAttribLocation(program, 0, 'a_position');
-  gl.linkProgram(program);
-  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-    const log = gl.getProgramInfoLog(program);
-    gl.deleteProgram(program);
-    throw new Error(`Program link error: ${log}`);
-  }
-  gl.deleteShader(vs);
-  gl.deleteShader(fs);
-  return program;
-}
-
-function seedToFloat(seed) {
-  return seed % 2147483647;
 }
 
 function createCrc32Table() {
@@ -173,134 +122,22 @@ export class WallpaperRenderer {
   constructor(canvas, initialState) {
     this.canvas = canvas;
     this.state = cloneState(initialState);
-    this.gl = this.createContext();
-    this.canvas2d = null;
-    this.blueNoiseTexture = null;
+    this.canvas2d = this.canvas?.getContext('2d') ?? null;
+    if (!this.canvas2d) {
+      console.warn('Unable to initialize Canvas2D rendering context');
+    }
+    this.bufferCanvas = document.createElement('canvas');
+    this.bufferCtx = this.bufferCanvas.getContext('2d');
     this.previewZoom = 1;
     this.previewOffset = { x: 0, y: 0 };
     this.dragging = false;
     this.lastPointer = null;
     this.needsRender = true;
+    this.wallpaperDirty = true;
     this.frameHandle = null;
-    this.init();
-  }
-
-  createContext() {
-    const gl = this.canvas.getContext('webgl2', { antialias: false, preserveDrawingBuffer: true });
-    if (!gl) {
-      return null;
-    }
-    return gl;
-  }
-
-  async init() {
-    if (this.gl) {
-      try {
-        this.setupWebGL();
-        await this.loadBlueNoise();
-      } catch (error) {
-        console.error(error);
-        this.enableCanvasFallback();
-      }
-    } else {
-      this.enableCanvasFallback();
-    }
     this.attachEvents();
     this.handleResize();
     this.startLoop();
-  }
-
-  enableCanvasFallback() {
-    if (this.gl) {
-      const loseContext = this.gl.getExtension?.('WEBGL_lose_context');
-      loseContext?.loseContext();
-    }
-    this.gl = null;
-    if (!this.canvas2d) {
-      this.canvas2d = this.canvas?.getContext('2d');
-      if (!this.canvas2d) {
-        console.warn('Unable to initialize Canvas2D fallback context');
-      }
-    }
-    document.getElementById('webgl-warning')?.classList.remove('d-none');
-    this.needsRender = true;
-  }
-
-  setupWebGL() {
-    const gl = this.gl;
-    const fsSource = createFragmentShaderSource(MAX_GRADIENT_STOPS);
-    this.program = createProgram(gl, vertexShaderSource, fsSource);
-    this.positionBuffer = createQuad(gl);
-    gl.useProgram(this.program);
-    gl.enableVertexAttribArray(0);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.positionBuffer);
-    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-    this.uniforms = this.collectUniforms(gl, this.program);
-  }
-
-  collectUniforms(gl, program) {
-    const names = [
-      'uResolution',
-      'uPreviewOffset',
-      'uPreviewZoom',
-      'uHue',
-      'uSaturation',
-      'uLightness',
-      'uGamma',
-      'uShaderVariant',
-      'uShaderStrength',
-      'uGradientType',
-      'uGradientMode',
-      'uGradientAngle',
-      'uGradientCenter',
-      'uGradientScale',
-      'uGradientBaseHue',
-      'uGradientBaseSaturation',
-      'uGradientBaseLightness',
-      'uGradientStopCount',
-      'uStopPositions',
-      'uStopAdjustments',
-      'uBlendMode',
-      'uNoiseAmount',
-      'uNoiseSize',
-      'uNoiseAlgorithm',
-      'uNoiseOctaves',
-      'uNoiseLacunarity',
-      'uNoiseGain',
-      'uChromaEnabled',
-      'uChromaIntensity',
-      'uIntensityCurve',
-      'uProtectShadows',
-      'uSeed',
-      'uTime',
-      'uBlueNoiseTexture',
-      'uHasBlueNoise',
-      'uVignetteStrength',
-      'uVignetteRadius',
-      'uVignetteFeather',
-      'uVignetteRoundness',
-      'uVignetteMode',
-      'uApplyDither',
-    ];
-    const map = {};
-    names.forEach((name) => {
-      map[name] = gl.getUniformLocation(program, name);
-    });
-    return map;
-  }
-
-  async loadBlueNoise() {
-    const gl = this.gl;
-    if (!gl) return;
-    const texture = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
-    const { data, size } = generateBlueNoiseTextureData(128, BLUE_NOISE_SEED);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, size, size, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
-    this.blueNoiseTexture = texture;
   }
 
   attachEvents() {
@@ -308,7 +145,8 @@ export class WallpaperRenderer {
     this.canvas.addEventListener('wheel', (event) => {
       event.preventDefault();
       const delta = event.deltaY > 0 ? 1.05 : 0.95;
-      this.previewZoom = Math.min(Math.max(this.previewZoom * delta, 0.5), 4);
+      this.previewZoom = clamp(this.previewZoom * delta, 0.5, 4);
+      this.clampPreviewOffset();
       this.needsRender = true;
     });
     this.canvas.addEventListener('pointerdown', (event) => {
@@ -330,8 +168,20 @@ export class WallpaperRenderer {
       this.previewOffset.x -= dx;
       this.previewOffset.y += dy;
       this.lastPointer = { x: event.clientX, y: event.clientY };
+      this.clampPreviewOffset();
       this.needsRender = true;
     });
+  }
+
+  clampPreviewOffset() {
+    const zoom = Math.max(this.previewZoom, 1e-3);
+    const { width, height } = this.state.canvas;
+    const viewWidth = width / zoom;
+    const viewHeight = height / zoom;
+    const limitX = Math.max(0, 0.5 - viewWidth / (2 * width));
+    const limitY = Math.max(0, 0.5 - viewHeight / (2 * height));
+    this.previewOffset.x = clamp(this.previewOffset.x, -limitX, limitX);
+    this.previewOffset.y = clamp(this.previewOffset.y, -limitY, limitY);
   }
 
   handleResize() {
@@ -362,137 +212,102 @@ export class WallpaperRenderer {
 
   updateState(nextState) {
     this.state = cloneState(nextState);
+    this.wallpaperDirty = true;
     this.handleResize();
+    this.clampPreviewOffset();
     this.needsRender = true;
   }
 
   renderPreview() {
-    if (this.gl) {
-      this.renderWebGL(this.canvas.width, this.canvas.height, true);
-    } else {
-      this.renderCanvasFallback();
+    this.renderCanvas(this.canvas, this.state, { preview: true });
+  }
+
+  ensureBufferCanvas(state) {
+    const width = Math.max(1, Math.round(state.canvas.width));
+    const height = Math.max(1, Math.round(state.canvas.height));
+    if (this.bufferCanvas.width !== width || this.bufferCanvas.height !== height) {
+      this.bufferCanvas.width = width;
+      this.bufferCanvas.height = height;
+      this.bufferCtx = this.bufferCanvas.getContext('2d');
+      this.wallpaperDirty = true;
     }
   }
 
-  renderWebGL(width, height, preview = false) {
-    const gl = this.gl;
-    gl.viewport(0, 0, width, height);
-    gl.useProgram(this.program);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.positionBuffer);
-    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-    const t = performance.now() / 1000;
-    const state = this.state;
-    gl.uniform2f(this.uniforms.uResolution, state.canvas.width, state.canvas.height);
-    gl.uniform2f(this.uniforms.uPreviewOffset, this.previewOffset.x, this.previewOffset.y);
-    gl.uniform1f(this.uniforms.uPreviewZoom, this.previewZoom);
-    gl.uniform1f(this.uniforms.uHue, state.color.hue);
-    gl.uniform1f(this.uniforms.uSaturation, state.color.saturation);
-    gl.uniform1f(this.uniforms.uLightness, state.color.lightness);
-    gl.uniform1f(this.uniforms.uGamma, state.color.gamma);
-    const palette = this.getGradientPalette(state);
-    const shaderVariant = shaderVariantToInt(state.rendering?.shader);
-    const shaderStrength = Math.min(Math.max(state.rendering?.shaderStrength ?? 0, 0), 1);
-    gl.uniform1i(this.uniforms.uShaderVariant, shaderVariant);
-    gl.uniform1f(this.uniforms.uShaderStrength, shaderStrength);
-    gl.uniform1i(this.uniforms.uGradientType, gradientTypeToInt(state.gradient.type));
-    gl.uniform1i(this.uniforms.uGradientMode, state.gradient.mode === 'discrete' ? 1 : 0);
-    gl.uniform1f(this.uniforms.uGradientAngle, state.gradient.angle);
-    gl.uniform2f(this.uniforms.uGradientCenter, state.gradient.center.x, state.gradient.center.y);
-    gl.uniform1f(this.uniforms.uGradientScale, state.gradient.scale);
-    gl.uniform1f(this.uniforms.uGradientBaseHue, palette.hue);
-    gl.uniform1f(this.uniforms.uGradientBaseSaturation, palette.saturation);
-    gl.uniform1f(this.uniforms.uGradientBaseLightness, palette.lightness);
-    gl.uniform1i(this.uniforms.uBlendMode, blendModeToInt(state.gradient.blend));
-    const stopPositions = new Float32Array(MAX_GRADIENT_STOPS);
-    const stopAdjustments = new Float32Array(MAX_GRADIENT_STOPS * 4);
-    state.gradient.stops.slice(0, MAX_GRADIENT_STOPS).forEach((stop, index) => {
-      stopPositions[index] = stop.pos;
-      const baseIndex = index * 4;
-      stopAdjustments[baseIndex] = stop.hueShift;
-      stopAdjustments[baseIndex + 1] = stop.lightnessDelta;
-      stopAdjustments[baseIndex + 2] = stop.opacity;
-      stopAdjustments[baseIndex + 3] = 0;
-    });
-    gl.uniform1i(this.uniforms.uGradientStopCount, Math.min(state.gradient.stops.length, MAX_GRADIENT_STOPS));
-    gl.uniform1fv(this.uniforms.uStopPositions, stopPositions);
-    gl.uniform4fv(this.uniforms.uStopAdjustments, stopAdjustments);
-    gl.uniform1f(this.uniforms.uNoiseAmount, state.grain.amount);
-    gl.uniform1i(this.uniforms.uNoiseSize, grainSizeToInt(state.grain.size));
-    gl.uniform1i(this.uniforms.uNoiseAlgorithm, grainAlgorithmToInt(state.grain.algorithm));
-    gl.uniform1i(this.uniforms.uNoiseOctaves, state.grain.octaves);
-    gl.uniform1f(this.uniforms.uNoiseLacunarity, state.grain.lacunarity);
-    gl.uniform1f(this.uniforms.uNoiseGain, state.grain.gain);
-    gl.uniform1i(this.uniforms.uChromaEnabled, state.grain.chroma.enabled ? 1 : 0);
-    gl.uniform1f(this.uniforms.uChromaIntensity, state.grain.chroma.intensity);
-    gl.uniform1i(this.uniforms.uIntensityCurve, intensityCurveToInt(state.grain.intensityCurve));
-    gl.uniform1f(this.uniforms.uProtectShadows, state.grain.protectShadows);
-    gl.uniform1f(this.uniforms.uSeed, seedToFloat(state.random.seed));
-    gl.uniform1f(this.uniforms.uTime, t);
-    gl.uniform1f(this.uniforms.uVignetteStrength, state.vignette.strength);
-    gl.uniform1f(this.uniforms.uVignetteRadius, state.vignette.radius);
-    gl.uniform1f(this.uniforms.uVignetteFeather, state.vignette.feather);
-    gl.uniform1f(this.uniforms.uVignetteRoundness, state.vignette.roundness);
-    gl.uniform1i(this.uniforms.uVignetteMode, state.vignette.mode === 'soft-light' ? 1 : 0);
-    const applyDither = state.output.format === 'jpg';
-    gl.uniform1i(this.uniforms.uApplyDither, applyDither ? 1 : 0);
-    if (this.blueNoiseTexture) {
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, this.blueNoiseTexture);
-      gl.uniform1i(this.uniforms.uBlueNoiseTexture, 0);
-      gl.uniform1i(this.uniforms.uHasBlueNoise, 1);
-    } else {
-      gl.uniform1i(this.uniforms.uHasBlueNoise, 0);
-    }
-    gl.drawArrays(gl.TRIANGLES, 0, 6);
-    if (!preview) {
-      gl.finish();
-    }
-  }
-
-  renderCanvasFallback(targetCanvas = this.canvas, stateOverride = this.state) {
-    let ctx = null;
-    if (targetCanvas === this.canvas && this.canvas2d) {
-      ctx = this.canvas2d;
-    } else {
-      ctx = targetCanvas.getContext('2d');
-      if (targetCanvas === this.canvas && ctx && !this.canvas2d) {
-        this.canvas2d = ctx;
+  renderCanvas(targetCanvas = this.canvas, stateOverride = this.state, options = {}) {
+    const state = stateOverride;
+    if (!targetCanvas) return;
+    if (options.preview) {
+      if (!this.canvas2d || !this.bufferCtx) return;
+      this.ensureBufferCanvas(state);
+      if (this.wallpaperDirty) {
+        this.paintWallpaper(this.bufferCtx, this.bufferCanvas.width, this.bufferCanvas.height, state);
+        this.wallpaperDirty = false;
       }
-    }
-    if (!ctx) {
-      console.warn('Canvas2D context unavailable for fallback rendering');
+      const ctx = this.canvas2d;
+      const deviceWidth = this.canvas.width;
+      const deviceHeight = this.canvas.height;
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, deviceWidth, deviceHeight);
+      ctx.imageSmoothingEnabled = true;
+      const zoom = Math.max(this.previewZoom, 1e-3);
+      const viewWidth = this.bufferCanvas.width / zoom;
+      const viewHeight = this.bufferCanvas.height / zoom;
+      const centerX = (0.5 + this.previewOffset.x) * this.bufferCanvas.width;
+      const centerY = (0.5 + this.previewOffset.y) * this.bufferCanvas.height;
+      const halfViewWidth = viewWidth / 2;
+      const halfViewHeight = viewHeight / 2;
+      const sx = clamp(centerX - halfViewWidth, 0, Math.max(0, this.bufferCanvas.width - viewWidth));
+      const sy = clamp(centerY - halfViewHeight, 0, Math.max(0, this.bufferCanvas.height - viewHeight));
+      ctx.drawImage(
+        this.bufferCanvas,
+        sx,
+        sy,
+        viewWidth,
+        viewHeight,
+        0,
+        0,
+        deviceWidth,
+        deviceHeight
+      );
+      ctx.restore();
       return;
     }
-    const state = stateOverride;
-    const width = targetCanvas.width;
-    const height = targetCanvas.height;
+    const ctx = targetCanvas.getContext('2d');
+    if (!ctx) {
+      console.warn('Canvas2D context unavailable for rendering');
+      return;
+    }
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, targetCanvas.width, targetCanvas.height);
+    this.paintWallpaper(ctx, targetCanvas.width, targetCanvas.height, state);
+    ctx.restore();
+  }
+
+  paintWallpaper(ctx, width, height, state) {
+    if (!ctx) return;
+    ctx.save();
+    ctx.clearRect(0, 0, width, height);
     const baseHue = state.color.hue;
     const baseSat = state.color.saturation * 100;
     const baseLight = state.color.lightness * 100;
-    const palette = this.getGradientPalette(state);
     ctx.fillStyle = `hsl(${baseHue} ${baseSat}% ${baseLight}%)`;
     ctx.fillRect(0, 0, width, height);
+    const palette = this.getGradientPalette(state);
     if (state.gradient.type !== 'none') {
       const gradient = this.createCanvasGradient(ctx, width, height, state.gradient, palette);
-      ctx.globalCompositeOperation = mapBlendToComposite(state.gradient.blend);
-      ctx.fillStyle = gradient;
-      ctx.fillRect(0, 0, width, height);
-      ctx.globalCompositeOperation = 'source-over';
+      if (gradient) {
+        ctx.globalCompositeOperation = mapBlendToComposite(state.gradient.blend);
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, width, height);
+        ctx.globalCompositeOperation = 'source-over';
+      }
     }
     this.applyShaderVariantFallback(ctx, width, height, state, palette);
-    const prng = createPrng(state.random.seed);
-    ctx.fillStyle = 'rgba(255,255,255,0.04)';
-    const samples = Math.floor(width * height * (state.grain.amount / 5000));
-    for (let i = 0; i < samples; i += 1) {
-      const x = prng() * width;
-      const y = prng() * height;
-      ctx.fillRect(x, y, 1, 1);
-    }
-    const radial = ctx.createRadialGradient(width / 2, height / 2, 0, width / 2, height / 2, Math.max(width, height) / 1.5);
-    radial.addColorStop(0, 'rgba(0,0,0,0)');
-    radial.addColorStop(1, `rgba(0,0,0,${state.vignette.strength})`);
-    ctx.fillStyle = radial;
-    ctx.fillRect(0, 0, width, height);
+    this.applyNoise(ctx, width, height, state);
+    this.applyVignette(ctx, width, height, state.vignette);
+    ctx.restore();
   }
 
   getGradientPalette(state) {
@@ -502,20 +317,20 @@ export class WallpaperRenderer {
     const lightness = typeof palette.lightness === 'number' ? palette.lightness : state.color.lightness;
     return {
       hue,
-      saturation: Math.min(Math.max(saturation, 0), 1),
-      lightness: Math.min(Math.max(lightness, 0), 1),
+      saturation: clamp(saturation, 0, 1),
+      lightness: clamp(lightness, 0, 1),
     };
   }
 
   applyShaderVariantFallback(ctx, width, height, state, palette) {
     const variant = state.rendering?.shader || 'classic';
-    const strength = Math.min(Math.max(state.rendering?.shaderStrength ?? 0, 0), 1);
+    const strength = clamp(state.rendering?.shaderStrength ?? 0, 0, 1);
     if (variant === 'classic' || strength <= 0) {
       return;
     }
     ctx.save();
     if (variant === 'lumina') {
-      const [r, g, b] = hslToRgb(palette.hue, palette.saturation, Math.min(palette.lightness + 0.15, 1));
+      const [r, g, b] = hslToRgb(palette.hue, palette.saturation, clamp(palette.lightness + 0.15, 0, 1));
       const gradient = ctx.createRadialGradient(
         width * state.gradient.center.x,
         height * state.gradient.center.y,
@@ -527,7 +342,6 @@ export class WallpaperRenderer {
       gradient.addColorStop(0, `rgba(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(b * 255)}, ${0.6 * strength})`);
       gradient.addColorStop(1, 'rgba(0,0,0,0)');
       ctx.globalCompositeOperation = 'screen';
-      ctx.globalAlpha = 1;
       ctx.fillStyle = gradient;
       ctx.fillRect(0, 0, width, height);
     } else if (variant === 'nocturne') {
@@ -540,12 +354,18 @@ export class WallpaperRenderer {
       ctx.fillStyle = 'rgba(20, 30, 60, 1)';
       ctx.fillRect(0, 0, width, height);
     } else if (variant === 'ember') {
-      const [r, g, b] = hslToRgb((palette.hue + 20) % 360, Math.min(palette.saturation + 0.1, 1), Math.min(palette.lightness + 0.05, 1));
-      const gradient = ctx.createRadialGradient(width / 2, height / 2, Math.min(width, height) * 0.2, width / 2, height / 2, Math.max(width, height));
+      const [r, g, b] = hslToRgb((palette.hue + 20) % 360, clamp(palette.saturation + 0.1, 0, 1), clamp(palette.lightness + 0.05, 0, 1));
+      const gradient = ctx.createRadialGradient(
+        width / 2,
+        height / 2,
+        Math.min(width, height) * 0.2,
+        width / 2,
+        height / 2,
+        Math.max(width, height)
+      );
       gradient.addColorStop(0, 'rgba(0,0,0,0)');
       gradient.addColorStop(1, `rgba(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(b * 255)}, ${0.5 * strength})`);
       ctx.globalCompositeOperation = 'screen';
-      ctx.globalAlpha = 1;
       ctx.fillStyle = gradient;
       ctx.fillRect(0, 0, width, height);
     }
@@ -553,7 +373,9 @@ export class WallpaperRenderer {
   }
 
   createCanvasGradient(ctx, width, height, gradientState, palette) {
-    let gradient;
+    const stops = gradientState.stops ?? [];
+    if (!stops.length) return null;
+    let gradient = null;
     if (gradientState.type === 'linear') {
       const angle = (gradientState.angle * Math.PI) / 180;
       const x = Math.cos(angle);
@@ -565,7 +387,7 @@ export class WallpaperRenderer {
         width / 2 + x * half,
         height / 2 + y * half
       );
-    } else {
+    } else if (gradientState.type === 'radial') {
       gradient = ctx.createRadialGradient(
         width * gradientState.center.x,
         height * gradientState.center.y,
@@ -574,78 +396,99 @@ export class WallpaperRenderer {
         height * gradientState.center.y,
         Math.max(width, height) * gradientState.scale
       );
-    }
-    gradientState.stops.forEach((stop) => {
-      const hue = (palette.hue + stop.hueShift + 360) % 360;
-      const lightness = Math.min(Math.max(palette.lightness + stop.lightnessDelta, 0), 1);
-      const saturation = Math.min(Math.max(palette.saturation, 0), 1);
-      const opacity = Math.min(Math.max(stop.opacity, 0), 1);
-      gradient.addColorStop(
-        stop.pos,
-        `hsla(${hue} ${(saturation * 100).toFixed(0)}% ${(lightness * 100).toFixed(0)}%, ${opacity})`
+    } else if (gradientState.type === 'conic') {
+      if (typeof ctx.createConicGradient !== 'function') {
+        console.warn('Conic gradients are not supported in this browser.');
+        return null;
+      }
+      gradient = ctx.createConicGradient(
+        ((gradientState.angle ?? 0) * Math.PI) / 180,
+        width * gradientState.center.x,
+        height * gradientState.center.y
       );
-    });
+    } else if (gradientState.type === 'corner-glow') {
+      const cornerX = clamp(gradientState.center.x, 0, 1) * width;
+      const cornerY = clamp(gradientState.center.y, 0, 1) * height;
+      gradient = ctx.createRadialGradient(
+        cornerX,
+        cornerY,
+        0,
+        cornerX,
+        cornerY,
+        Math.max(width, height) * 1.2
+      );
+    }
+    if (!gradient) return null;
+    const colors = stops.map((stop) => this.resolveStopColor(stop, palette));
+    if (gradientState.mode === 'discrete') {
+      stops.forEach((stop, index) => {
+        const color = colors[index];
+        gradient.addColorStop(stop.pos, color);
+        const nextPos = stops[index + 1]?.pos ?? 1;
+        const epsilon = Math.max((nextPos - stop.pos) * 0.5, 1e-4);
+        gradient.addColorStop(Math.min(stop.pos + epsilon, 1), color);
+      });
+    } else {
+      stops.forEach((stop, index) => {
+        gradient.addColorStop(stop.pos, colors[index]);
+      });
+    }
     return gradient;
   }
 
-  async renderToBlob(state, format) {
-    if (this.gl) {
-      return this.renderWebGLToBlob(state, format);
-    }
-    return this.renderCanvasToBlob(state, format);
+  resolveStopColor(stop, palette) {
+    const hue = (palette.hue + stop.hueShift + 360) % 360;
+    const lightness = clamp(palette.lightness + stop.lightnessDelta, 0, 1);
+    const saturation = clamp(palette.saturation, 0, 1);
+    const opacity = clamp(stop.opacity, 0, 1);
+    return `hsla(${hue} ${(saturation * 100).toFixed(0)}% ${(lightness * 100).toFixed(0)}%, ${opacity})`;
   }
 
-  async renderWebGLToBlob(state, format) {
-    const gl = this.gl;
-    const width = state.canvas.width;
-    const height = state.canvas.height;
-    const prevState = cloneState(this.state);
-    this.state = cloneState(state);
-    const prevCanvasSize = { width: this.canvas.width, height: this.canvas.height };
-    const prevOffset = { ...this.previewOffset };
-    const prevZoom = this.previewZoom;
-    this.previewOffset = { x: 0, y: 0 };
-    this.previewZoom = 1;
-    this.canvas.width = width;
-    this.canvas.height = height;
-    this.renderWebGL(width, height, false);
-    const pixels = new Uint8Array(width * height * 4);
-    gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
-    const flipped = new Uint8ClampedArray(width * height * 4);
-    for (let y = 0; y < height; y += 1) {
-      const srcStart = y * width * 4;
-      const dstStart = (height - y - 1) * width * 4;
-      flipped.set(pixels.subarray(srcStart, srcStart + width * 4), dstStart);
+  applyNoise(ctx, width, height, state) {
+    const amount = clamp(state.grain.amount, 0, 100);
+    if (amount <= 0) return;
+    const samples = Math.floor(width * height * (amount / 5000));
+    const prng = createPrng(state.random.seed);
+    ctx.save();
+    ctx.globalAlpha = clamp(amount / 150, 0.02, 0.15);
+    ctx.fillStyle = '#ffffff';
+    for (let i = 0; i < samples; i += 1) {
+      const x = prng() * width;
+      const y = prng() * height;
+      ctx.fillRect(x, y, 1, 1);
     }
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext('2d');
-    const imageData = new ImageData(flipped, width, height);
-    ctx.putImageData(imageData, 0, 0);
-    const type = format === 'png' ? 'image/png' : format === 'webp' ? 'image/webp' : 'image/jpeg';
-    const quality = format === 'jpg' ? state.output.jpgQuality : undefined;
-    const blob = await new Promise((resolve, reject) => {
-      canvas.toBlob((result) => {
-        if (result) resolve(result);
-        else reject(new Error('Failed to encode image'));
-      }, type, quality);
-    });
-    this.canvas.width = prevCanvasSize.width;
-    this.canvas.height = prevCanvasSize.height;
-    this.state = prevState;
-    this.previewOffset = prevOffset;
-    this.previewZoom = prevZoom;
-    this.handleResize();
-    const withMetadata = await maybeEmbedMetadata(blob, format, state);
-    return withMetadata;
+    ctx.restore();
+  }
+
+  applyVignette(ctx, width, height, vignetteState) {
+    const strength = clamp(vignetteState?.strength ?? 0, 0, 1);
+    if (strength <= 0) return;
+    const radius = clamp(vignetteState.radius ?? 0.8, 0.1, 2);
+    const feather = clamp(vignetteState.feather ?? 0.5, 0.01, 1);
+    const maxDim = Math.max(width, height);
+    const outer = maxDim * radius;
+    const inner = Math.max(0, outer * (1 - feather));
+    const gradient = ctx.createRadialGradient(width / 2, height / 2, inner, width / 2, height / 2, outer);
+    gradient.addColorStop(0, 'rgba(0,0,0,0)');
+    gradient.addColorStop(1, 'rgba(0,0,0,1)');
+    ctx.save();
+    ctx.globalCompositeOperation = vignetteState.mode === 'soft-light' ? 'soft-light' : 'multiply';
+    ctx.globalAlpha = strength;
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, width, height);
+    ctx.restore();
+  }
+
+  async renderToBlob(state, format) {
+    return this.renderCanvasToBlob(state, format);
   }
 
   async renderCanvasToBlob(state, format) {
     const canvas = document.createElement('canvas');
     canvas.width = state.canvas.width;
     canvas.height = state.canvas.height;
-    this.renderCanvasFallback(canvas, cloneState(state));
+    const ctx = canvas.getContext('2d');
+    this.paintWallpaper(ctx, canvas.width, canvas.height, cloneState(state));
     const type = format === 'png' ? 'image/png' : format === 'webp' ? 'image/webp' : 'image/jpeg';
     const quality = format === 'jpg' ? state.output.jpgQuality : undefined;
     const blob = await new Promise((resolve, reject) => {
@@ -658,40 +501,17 @@ export class WallpaperRenderer {
   }
 }
 
-function gradientTypeToInt(type) {
-  return ['none', 'linear', 'radial', 'conic', 'corner-glow'].indexOf(type);
-}
-
-function blendModeToInt(mode) {
-  return ['normal', 'overlay', 'soft-light', 'screen'].indexOf(mode);
-}
-
-function grainSizeToInt(size) {
-  return ['fine', 'normal', 'coarse'].indexOf(size);
-}
-
-function grainAlgorithmToInt(name) {
-  return [
-    'uniform',
-    'gaussian',
-    'value',
-    'perlin',
-    'fbm',
-    'simplex',
-    'blue-noise',
-    'poisson-stipple',
-    'paper-fiber',
-  ].indexOf(name);
-}
-
-function intensityCurveToInt(name) {
-  return ['linear', 'log', 's-curve'].indexOf(name);
-}
-
-function shaderVariantToInt(name) {
-  const variants = ['classic', 'lumina', 'nocturne', 'ember'];
-  const index = variants.indexOf(name);
-  return index >= 0 ? index : 0;
+export async function downloadWallpaper(renderer, state) {
+  const format = state.output.format;
+  try {
+    const blob = await renderer.renderToBlob(state, format);
+    const filename = `wall_${formatDimension(state.canvas.width, state.canvas.height)}_${state.random.seed}.${format === 'jpg' ? 'jpg' : format}`;
+    downloadBlob(blob, filename);
+    toast('Render complete', 'success');
+  } catch (error) {
+    console.error(error);
+    toast('Failed to render wallpaper', 'danger');
+  }
 }
 
 function mapBlendToComposite(mode) {
@@ -704,94 +524,5 @@ function mapBlendToComposite(mode) {
       return 'screen';
     default:
       return 'source-over';
-  }
-}
-
-function generateBlueNoiseTextureData(size, seed) {
-  const prng = createPrng(seed);
-  const base = new Float32Array(size * size);
-  for (let i = 0; i < base.length; i += 1) {
-    base[i] = prng();
-  }
-  const blurred = applyWrappedGaussianBlur(base, size, 3);
-  const diff = new Float32Array(size * size);
-  let min = Infinity;
-  let max = -Infinity;
-  for (let i = 0; i < diff.length; i += 1) {
-    const value = base[i] - blurred[i];
-    diff[i] = value;
-    if (value < min) min = value;
-    if (value > max) max = value;
-  }
-  if (!Number.isFinite(min) || !Number.isFinite(max) || Math.abs(max - min) < 1e-5) {
-    min = -0.5;
-    max = 0.5;
-  }
-  const data = new Uint8Array(size * size * 4);
-  for (let i = 0; i < diff.length; i += 1) {
-    let value = (diff[i] - min) / (max - min);
-    value = Math.pow(Math.min(Math.max(value, 0), 1), 1.1);
-    const byte = Math.round(value * 255);
-    const offset = i * 4;
-    data[offset] = byte;
-    data[offset + 1] = byte;
-    data[offset + 2] = byte;
-    data[offset + 3] = 255;
-  }
-  return { data, size };
-}
-
-function applyWrappedGaussianBlur(values, size, radius) {
-  if (radius <= 0) {
-    return values.slice();
-  }
-  const sigma = radius / 2 || 1;
-  const kernel = [];
-  let kernelSum = 0;
-  for (let i = -radius; i <= radius; i += 1) {
-    const weight = Math.exp(-(i * i) / (2 * sigma * sigma));
-    kernel.push(weight);
-    kernelSum += weight;
-  }
-  for (let i = 0; i < kernel.length; i += 1) {
-    kernel[i] /= kernelSum;
-  }
-  const temp = new Float32Array(size * size);
-  for (let y = 0; y < size; y += 1) {
-    for (let x = 0; x < size; x += 1) {
-      let accum = 0;
-      for (let k = -radius; k <= radius; k += 1) {
-        const weight = kernel[k + radius];
-        const nx = (x + k + size) % size;
-        accum += values[y * size + nx] * weight;
-      }
-      temp[y * size + x] = accum;
-    }
-  }
-  const output = new Float32Array(size * size);
-  for (let x = 0; x < size; x += 1) {
-    for (let y = 0; y < size; y += 1) {
-      let accum = 0;
-      for (let k = -radius; k <= radius; k += 1) {
-        const weight = kernel[k + radius];
-        const ny = (y + k + size) % size;
-        accum += temp[ny * size + x] * weight;
-      }
-      output[y * size + x] = accum;
-    }
-  }
-  return output;
-}
-
-export async function downloadWallpaper(renderer, state) {
-  const format = state.output.format;
-  try {
-    const blob = await renderer.renderToBlob(state, format);
-    const filename = `wall_${formatDimension(state.canvas.width, state.canvas.height)}_${state.random.seed}.${format === 'jpg' ? 'jpg' : format}`;
-    downloadBlob(blob, filename);
-    toast('Render complete', 'success');
-  } catch (error) {
-    console.error(error);
-    toast('Failed to render wallpaper', 'danger');
   }
 }

@@ -71,11 +71,6 @@ input[type="color"] {
   font-size: 0.75rem;
 }
 
-#webgl-warning {
-  position: absolute;
-  inset: 1rem;
-}
-
 @media (max-width: 991px) {
   #controls-panel,
   #presets-panel {
