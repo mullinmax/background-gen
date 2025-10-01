@@ -1,6 +1,6 @@
 import { cloneState, MAX_GRADIENT_STOPS } from './state.js';
 import { createFragmentShaderSource, vertexShaderSource } from './webgl/shaders.js';
-import { downloadBlob, formatDimension, toast } from './utils.js';
+import { downloadBlob, formatDimension, hslToRgb, toast } from './utils.js';
 
 const DPR = () => window.devicePixelRatio || 1;
 const BLUE_NOISE_SEED = 0x9e3779b9;
@@ -232,11 +232,16 @@ export class WallpaperRenderer {
       'uSaturation',
       'uLightness',
       'uGamma',
+      'uShaderVariant',
+      'uShaderStrength',
       'uGradientType',
       'uGradientMode',
       'uGradientAngle',
       'uGradientCenter',
       'uGradientScale',
+      'uGradientBaseHue',
+      'uGradientBaseSaturation',
+      'uGradientBaseLightness',
       'uGradientStopCount',
       'uStopPositions',
       'uStopAdjustments',
@@ -369,11 +374,19 @@ export class WallpaperRenderer {
     gl.uniform1f(this.uniforms.uSaturation, state.color.saturation);
     gl.uniform1f(this.uniforms.uLightness, state.color.lightness);
     gl.uniform1f(this.uniforms.uGamma, state.color.gamma);
+    const palette = this.getGradientPalette(state);
+    const shaderVariant = shaderVariantToInt(state.rendering?.shader);
+    const shaderStrength = Math.min(Math.max(state.rendering?.shaderStrength ?? 0, 0), 1);
+    gl.uniform1i(this.uniforms.uShaderVariant, shaderVariant);
+    gl.uniform1f(this.uniforms.uShaderStrength, shaderStrength);
     gl.uniform1i(this.uniforms.uGradientType, gradientTypeToInt(state.gradient.type));
     gl.uniform1i(this.uniforms.uGradientMode, state.gradient.mode === 'discrete' ? 1 : 0);
     gl.uniform1f(this.uniforms.uGradientAngle, state.gradient.angle);
     gl.uniform2f(this.uniforms.uGradientCenter, state.gradient.center.x, state.gradient.center.y);
     gl.uniform1f(this.uniforms.uGradientScale, state.gradient.scale);
+    gl.uniform1f(this.uniforms.uGradientBaseHue, palette.hue);
+    gl.uniform1f(this.uniforms.uGradientBaseSaturation, palette.saturation);
+    gl.uniform1f(this.uniforms.uGradientBaseLightness, palette.lightness);
     gl.uniform1i(this.uniforms.uBlendMode, blendModeToInt(state.gradient.blend));
     const stopPositions = new Float32Array(MAX_GRADIENT_STOPS);
     const stopAdjustments = new Float32Array(MAX_GRADIENT_STOPS * 4);
@@ -429,15 +442,17 @@ export class WallpaperRenderer {
     const baseHue = state.color.hue;
     const baseSat = state.color.saturation * 100;
     const baseLight = state.color.lightness * 100;
+    const palette = this.getGradientPalette(state);
     ctx.fillStyle = `hsl(${baseHue} ${baseSat}% ${baseLight}%)`;
     ctx.fillRect(0, 0, width, height);
     if (state.gradient.type !== 'none') {
-      const gradient = this.createCanvasGradient(ctx, width, height, state.gradient, state.color);
+      const gradient = this.createCanvasGradient(ctx, width, height, state.gradient, palette);
       ctx.globalCompositeOperation = mapBlendToComposite(state.gradient.blend);
       ctx.fillStyle = gradient;
       ctx.fillRect(0, 0, width, height);
       ctx.globalCompositeOperation = 'source-over';
     }
+    this.applyShaderVariantFallback(ctx, width, height, state, palette);
     const prng = createPrng(state.random.seed);
     ctx.fillStyle = 'rgba(255,255,255,0.04)';
     const samples = Math.floor(width * height * (state.grain.amount / 5000));
@@ -453,7 +468,64 @@ export class WallpaperRenderer {
     ctx.fillRect(0, 0, width, height);
   }
 
-  createCanvasGradient(ctx, width, height, gradientState, colorState) {
+  getGradientPalette(state) {
+    const palette = state.gradient?.palette ?? {};
+    const hue = typeof palette.hue === 'number' ? palette.hue : state.color.hue;
+    const saturation = typeof palette.saturation === 'number' ? palette.saturation : state.color.saturation;
+    const lightness = typeof palette.lightness === 'number' ? palette.lightness : state.color.lightness;
+    return {
+      hue,
+      saturation: Math.min(Math.max(saturation, 0), 1),
+      lightness: Math.min(Math.max(lightness, 0), 1),
+    };
+  }
+
+  applyShaderVariantFallback(ctx, width, height, state, palette) {
+    const variant = state.rendering?.shader || 'classic';
+    const strength = Math.min(Math.max(state.rendering?.shaderStrength ?? 0, 0), 1);
+    if (variant === 'classic' || strength <= 0) {
+      return;
+    }
+    ctx.save();
+    if (variant === 'lumina') {
+      const [r, g, b] = hslToRgb(palette.hue, palette.saturation, Math.min(palette.lightness + 0.15, 1));
+      const gradient = ctx.createRadialGradient(
+        width * state.gradient.center.x,
+        height * state.gradient.center.y,
+        0,
+        width * state.gradient.center.x,
+        height * state.gradient.center.y,
+        Math.max(width, height) * 0.6
+      );
+      gradient.addColorStop(0, `rgba(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(b * 255)}, ${0.6 * strength})`);
+      gradient.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.globalCompositeOperation = 'screen';
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, width, height);
+    } else if (variant === 'nocturne') {
+      ctx.globalCompositeOperation = 'color';
+      ctx.globalAlpha = strength * 0.35;
+      ctx.fillStyle = 'rgba(60, 80, 140, 1)';
+      ctx.fillRect(0, 0, width, height);
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = strength * 0.25;
+      ctx.fillStyle = 'rgba(20, 30, 60, 1)';
+      ctx.fillRect(0, 0, width, height);
+    } else if (variant === 'ember') {
+      const [r, g, b] = hslToRgb((palette.hue + 20) % 360, Math.min(palette.saturation + 0.1, 1), Math.min(palette.lightness + 0.05, 1));
+      const gradient = ctx.createRadialGradient(width / 2, height / 2, Math.min(width, height) * 0.2, width / 2, height / 2, Math.max(width, height));
+      gradient.addColorStop(0, 'rgba(0,0,0,0)');
+      gradient.addColorStop(1, `rgba(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(b * 255)}, ${0.5 * strength})`);
+      ctx.globalCompositeOperation = 'screen';
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, width, height);
+    }
+    ctx.restore();
+  }
+
+  createCanvasGradient(ctx, width, height, gradientState, palette) {
     let gradient;
     if (gradientState.type === 'linear') {
       const angle = (gradientState.angle * Math.PI) / 180;
@@ -477,11 +549,13 @@ export class WallpaperRenderer {
       );
     }
     gradientState.stops.forEach((stop) => {
-      const hue = (colorState.hue + stop.hueShift + 360) % 360;
-      const lightness = Math.min(Math.max(colorState.lightness + stop.lightnessDelta, 0), 1);
+      const hue = (palette.hue + stop.hueShift + 360) % 360;
+      const lightness = Math.min(Math.max(palette.lightness + stop.lightnessDelta, 0), 1);
+      const saturation = Math.min(Math.max(palette.saturation, 0), 1);
+      const opacity = Math.min(Math.max(stop.opacity, 0), 1);
       gradient.addColorStop(
         stop.pos,
-        `hsla(${hue} ${(colorState.saturation * 100).toFixed(0)}% ${(lightness * 100).toFixed(0)}%, ${stop.opacity})`
+        `hsla(${hue} ${(saturation * 100).toFixed(0)}% ${(lightness * 100).toFixed(0)}%, ${opacity})`
       );
     });
     return gradient;
@@ -585,6 +659,12 @@ function grainAlgorithmToInt(name) {
 
 function intensityCurveToInt(name) {
   return ['linear', 'log', 's-curve'].indexOf(name);
+}
+
+function shaderVariantToInt(name) {
+  const variants = ['classic', 'lumina', 'nocturne', 'ember'];
+  const index = variants.indexOf(name);
+  return index >= 0 ? index : 0;
 }
 
 function mapBlendToComposite(mode) {

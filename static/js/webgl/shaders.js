@@ -26,12 +26,17 @@ uniform float uHue;
 uniform float uSaturation;
 uniform float uLightness;
 uniform float uGamma;
+uniform int uShaderVariant;
+uniform float uShaderStrength;
 
 uniform int uGradientType;
 uniform int uGradientMode;
 uniform float uGradientAngle;
 uniform vec2 uGradientCenter;
 uniform float uGradientScale;
+uniform float uGradientBaseHue;
+uniform float uGradientBaseSaturation;
+uniform float uGradientBaseLightness;
 uniform int uGradientStopCount;
 uniform float uStopPositions[${maxStops}];
 uniform vec4 uStopAdjustments[${maxStops}]; // hueShift, lightnessDelta, opacity, unused
@@ -259,9 +264,9 @@ float gradientFactor(vec2 uv) {
   }
 }
 
-vec3 gradientColor(float t, vec3 baseHSL) {
+vec3 gradientColor(float t, vec3 fillBaseHSL, vec3 gradientBaseHSL) {
   if (uGradientStopCount == 0) {
-    return hsl2rgb(baseHSL);
+    return hsl2rgb(gradientBaseHSL);
   }
   if (uGradientMode == 1) {
     float bestPos = 0.0;
@@ -274,8 +279,12 @@ vec3 gradientColor(float t, vec3 baseHSL) {
         bestAdjust = uStopAdjustments[i];
       }
     }
-    vec3 hsl = vec3(baseHSL.x + bestAdjust.x / 360.0, clamp(baseHSL.y, 0.0, 1.0), clamp(baseHSL.z + bestAdjust.y, 0.0, 1.0));
-    return mix(hsl2rgb(baseHSL), hsl2rgb(hsl), bestAdjust.z);
+    vec3 hsl = vec3(
+      gradientBaseHSL.x + bestAdjust.x / 360.0,
+      clamp(gradientBaseHSL.y, 0.0, 1.0),
+      clamp(gradientBaseHSL.z + bestAdjust.y, 0.0, 1.0)
+    );
+    return mix(hsl2rgb(fillBaseHSL), hsl2rgb(hsl), clamp(bestAdjust.z, 0.0, 1.0));
   }
   float prevPos = uStopPositions[0];
   vec4 prevAdjust = uStopAdjustments[0];
@@ -284,23 +293,40 @@ vec3 gradientColor(float t, vec3 baseHSL) {
     float nextPos = uStopPositions[i];
     vec4 nextAdjust = uStopAdjustments[i];
     if (t <= prevPos) {
-      vec3 hsl = vec3(baseHSL.x + prevAdjust.x / 360.0, clamp(baseHSL.y, 0.0, 1.0), clamp(baseHSL.z + prevAdjust.y, 0.0, 1.0));
-      return mix(hsl2rgb(baseHSL), hsl2rgb(hsl), prevAdjust.z);
+      vec3 hsl = vec3(
+        gradientBaseHSL.x + prevAdjust.x / 360.0,
+        clamp(gradientBaseHSL.y, 0.0, 1.0),
+        clamp(gradientBaseHSL.z + prevAdjust.y, 0.0, 1.0)
+      );
+      return mix(hsl2rgb(fillBaseHSL), hsl2rgb(hsl), clamp(prevAdjust.z, 0.0, 1.0));
     }
     if (t <= nextPos) {
       float segment = clamp((t - prevPos) / max(nextPos - prevPos, 1e-5), 0.0, 1.0);
-      vec3 hslA = vec3(baseHSL.x + prevAdjust.x / 360.0, clamp(baseHSL.y, 0.0, 1.0), clamp(baseHSL.z + prevAdjust.y, 0.0, 1.0));
-      vec3 hslB = vec3(baseHSL.x + nextAdjust.x / 360.0, clamp(baseHSL.y, 0.0, 1.0), clamp(baseHSL.z + nextAdjust.y, 0.0, 1.0));
+      vec3 hslA = vec3(
+        gradientBaseHSL.x + prevAdjust.x / 360.0,
+        clamp(gradientBaseHSL.y, 0.0, 1.0),
+        clamp(gradientBaseHSL.z + prevAdjust.y, 0.0, 1.0)
+      );
+      vec3 hslB = vec3(
+        gradientBaseHSL.x + nextAdjust.x / 360.0,
+        clamp(gradientBaseHSL.y, 0.0, 1.0),
+        clamp(gradientBaseHSL.z + nextAdjust.y, 0.0, 1.0)
+      );
       vec3 rgbA = hsl2rgb(hslA);
       vec3 rgbB = hsl2rgb(hslB);
       float blend = mix(prevAdjust.z, nextAdjust.z, segment);
-      return mix(rgbA, rgbB, smoothstep(0.0, 1.0, segment)) * blend + hsl2rgb(baseHSL) * (1.0 - blend);
+      float eased = smoothstep(0.0, 1.0, segment);
+      return mix(rgbA, rgbB, eased) * clamp(blend, 0.0, 1.0) + hsl2rgb(fillBaseHSL) * (1.0 - clamp(blend, 0.0, 1.0));
     }
     prevPos = nextPos;
     prevAdjust = nextAdjust;
   }
-  vec3 hsl = vec3(baseHSL.x + prevAdjust.x / 360.0, clamp(baseHSL.y, 0.0, 1.0), clamp(baseHSL.z + prevAdjust.y, 0.0, 1.0));
-  return mix(hsl2rgb(baseHSL), hsl2rgb(hsl), prevAdjust.z);
+  vec3 hsl = vec3(
+    gradientBaseHSL.x + prevAdjust.x / 360.0,
+    clamp(gradientBaseHSL.y, 0.0, 1.0),
+    clamp(gradientBaseHSL.z + prevAdjust.y, 0.0, 1.0)
+  );
+  return mix(hsl2rgb(fillBaseHSL), hsl2rgb(hsl), clamp(prevAdjust.z, 0.0, 1.0));
 }
 
 vec3 blend(vec3 base, vec3 layer, int mode) {
@@ -309,6 +335,29 @@ vec3 blend(vec3 base, vec3 layer, int mode) {
   if (mode == 2) return mix(base, (base <= 0.5) ? (2.0 * base * layer) : (1.0 - 2.0 * (1.0 - base) * (1.0 - layer)), 0.8);
   if (mode == 3) return 1.0 - (1.0 - base) * (1.0 - layer);
   return mix(base, layer, 1.0);
+}
+
+vec3 applyShaderVariant(vec3 color, float gradientT, vec3 gradientBaseRGB) {
+  float strength = clamp(uShaderStrength, 0.0, 1.0);
+  if (uShaderVariant == 0 || strength <= 0.0001) {
+    return color;
+  }
+  if (uShaderVariant == 1) {
+    float halo = pow(clamp(1.0 - gradientT, 0.0, 1.0), 1.5);
+    vec3 glow = mix(color, gradientBaseRGB + vec3(0.2, 0.15, 0.3), 0.5);
+    return mix(color, clamp(glow, 0.0, 1.0), strength * halo);
+  }
+  if (uShaderVariant == 2) {
+    float rim = smoothstep(0.25, 1.0, gradientT);
+    vec3 cooled = vec3(color.r * 0.75 + 0.05, color.g * 0.85 + 0.05, min(color.b + 0.2, 1.0));
+    return mix(color, clamp(cooled, 0.0, 1.0), strength * (0.6 + 0.4 * rim));
+  }
+  if (uShaderVariant == 3) {
+    float edge = smoothstep(0.4, 1.0, gradientT);
+    vec3 warmed = mix(color + vec3(0.2, 0.1, -0.05), gradientBaseRGB + vec3(0.1, 0.05, -0.02), 0.5);
+    return mix(color, clamp(warmed, 0.0, 1.0), strength * edge);
+  }
+  return color;
 }
 
 vec3 applyVignette(vec3 color, vec2 uv) {
@@ -365,8 +414,11 @@ void main() {
   vec2 previewUV = clamp(uv, 0.0, 1.0);
   vec3 baseHSL = vec3(uHue / 360.0, uSaturation, uLightness);
   vec3 baseColor = hsl2rgb(baseHSL);
-  vec3 gradientCol = gradientColor(gradientFactor(previewUV), baseHSL);
+  vec3 gradientBaseHSL = vec3(uGradientBaseHue / 360.0, clamp(uGradientBaseSaturation, 0.0, 1.0), clamp(uGradientBaseLightness, 0.0, 1.0));
+  float gradientT = gradientFactor(previewUV);
+  vec3 gradientCol = gradientColor(gradientT, baseHSL, gradientBaseHSL);
   vec3 composed = blend(baseColor, gradientCol, uBlendMode);
+  composed = applyShaderVariant(composed, gradientT, hsl2rgb(gradientBaseHSL));
   float n = noiseValue(uv);
   composed = applyNoise(composed, n);
   composed = applyVignette(composed, previewUV);

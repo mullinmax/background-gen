@@ -21,11 +21,13 @@ const VIGNETTE_MODES = ['multiply', 'soft-light'];
 const OUTPUT_FORMATS = ['png', 'webp', 'jpg'];
 
 export class ControlPanel {
-  constructor(root, accordionRoot, initialState, onChange) {
+  constructor(root, accordionRoot, initialState, onChange, shaderOptions = []) {
     this.root = root;
     this.accordionRoot = accordionRoot;
     this.onChange = onChange;
     this.state = cloneState(initialState);
+    this.shaderOptions = Array.isArray(shaderOptions) ? shaderOptions : [];
+    this.shaderDescriptionEl = null;
     this.sectionIdCounter = 0;
     this.render();
   }
@@ -37,8 +39,12 @@ export class ControlPanel {
   render() {
     this.sectionIdCounter = 0;
     this.accordionRoot.innerHTML = '';
+    this.shaderDescriptionEl = null;
+    this.shaderStrengthInput = null;
+    this.shaderStrengthNumber = null;
     this.createCanvasSection();
     this.createColorSection();
+    this.createRenderingSection();
     this.createGradientSection();
     this.createGrainSection();
     this.createVignetteSection();
@@ -96,8 +102,63 @@ export class ControlPanel {
     this.onColorPreviewUpdate = updatePreview;
   }
 
+  createRenderingSection() {
+    if (!this.state.rendering) {
+      this.state.rendering = { shader: 'classic', shaderStrength: 0.5 };
+    }
+    const section = this.createSection('Rendering');
+    const options = (this.shaderOptions.length
+      ? this.shaderOptions
+      : [{ id: 'classic', name: 'Classic Gradient', description: 'Baseline renderer.', default_strength: 0 }]
+    ).map((option) => ({ value: option.id, label: option.name, description: option.description, strength: option.default_strength ?? 0 }));
+    section.body.append(
+      this.createSelect(
+        'Shader Variant',
+        options,
+        this.state.rendering.shader,
+        (value) => {
+          this.state.rendering.shader = value;
+          const match = options.find((item) => item.value === value);
+          if (match && typeof match.strength === 'number' && Number.isFinite(match.strength) && match.strength >= 0) {
+            this.state.rendering.shaderStrength = clamp(match.strength, 0, 1);
+          }
+          this.updateShaderDescription();
+          this.emitChange();
+          if (this.shaderStrengthInput) {
+            this.shaderStrengthInput.value = String(this.state.rendering.shaderStrength);
+            if (this.shaderStrengthNumber) {
+              this.shaderStrengthNumber.value = String(Math.round(this.state.rendering.shaderStrength * 100));
+            }
+          }
+        }
+      )
+    );
+    const description = document.createElement('p');
+    description.className = 'small text-secondary mb-0';
+    section.body.append(description);
+    this.shaderDescriptionEl = description;
+    this.updateShaderDescription();
+    const strengthControl = this.createRangeInput(
+      'Shader Strength',
+      this.state.rendering.shaderStrength,
+      0,
+      1,
+      0.01,
+      (value) => {
+        this.state.rendering.shaderStrength = value;
+        this.emitChange();
+      },
+      true
+    );
+    const [rangeEl, numberEl] = strengthControl.querySelectorAll('input');
+    this.shaderStrengthInput = rangeEl;
+    this.shaderStrengthNumber = numberEl;
+    section.body.append(strengthControl);
+  }
+
   createGradientSection() {
     const section = this.createSection('Gradient');
+    const palette = this.ensureGradientPalette();
     section.body.append(
       this.createSelect('Type', GRADIENT_TYPES, this.state.gradient.type, (value) => {
         this.state.gradient.type = value;
@@ -123,6 +184,18 @@ export class ControlPanel {
         this.state.gradient.scale = value;
         this.emitChange();
       }),
+      this.createRangeInput('Palette Hue', palette.hue, 0, 360, 1, (value) => {
+        this.state.gradient.palette.hue = value;
+        this.emitChange();
+      }),
+      this.createRangeInput('Palette Saturation', palette.saturation, 0, 1, 0.01, (value) => {
+        this.state.gradient.palette.saturation = value;
+        this.emitChange();
+      }, true),
+      this.createRangeInput('Palette Lightness', palette.lightness, 0, 1, 0.01, (value) => {
+        this.state.gradient.palette.lightness = value;
+        this.emitChange();
+      }, true),
       this.createSelect('Blend', BLEND_MODES, this.state.gradient.blend, (value) => {
         this.state.gradient.blend = value;
         this.emitChange();
@@ -140,6 +213,26 @@ export class ControlPanel {
     this.stopContainer = stopContainer;
     this.addStopButton = addButton;
     this.renderGradientStops();
+  }
+
+  ensureGradientPalette() {
+    if (!this.state.gradient.palette) {
+      this.state.gradient.palette = {
+        hue: this.state.color?.hue ?? 210,
+        saturation: this.state.color?.saturation ?? 0.6,
+        lightness: this.state.color?.lightness ?? 0.5,
+      };
+    }
+    if (typeof this.state.gradient.palette.hue !== 'number') {
+      this.state.gradient.palette.hue = this.state.color?.hue ?? 210;
+    }
+    if (typeof this.state.gradient.palette.saturation !== 'number') {
+      this.state.gradient.palette.saturation = this.state.color?.saturation ?? 0.6;
+    }
+    if (typeof this.state.gradient.palette.lightness !== 'number') {
+      this.state.gradient.palette.lightness = this.state.color?.lightness ?? 0.5;
+    }
+    return this.state.gradient.palette;
   }
 
   renderGradientStops() {
@@ -320,6 +413,19 @@ export class ControlPanel {
     );
   }
 
+  updateShaderDescription() {
+    if (!this.shaderDescriptionEl) return;
+    const current = this.state.rendering?.shader ?? 'classic';
+    const option = this.shaderOptions.find((entry) => entry.id === current);
+    const fallbacks = {
+      classic: 'Baseline renderer blending the gradient with the base color.',
+      lumina: 'Adds a subtle bloom from the center to enhance luminosity.',
+      nocturne: 'Applies a cool tint and gentle contrast lift for night scenes.',
+      ember: 'Warms outer edges with ember-inspired glow.',
+    };
+    this.shaderDescriptionEl.textContent = option?.description ?? fallbacks[current] ?? 'Configure the shader pipeline for the background.';
+  }
+
   createSection(title) {
     const id = `section-${this.sectionIdCounter++}`;
     const card = document.createElement('div');
@@ -409,12 +515,14 @@ export class ControlPanel {
     wrapper.textContent = label;
     const select = document.createElement('select');
     select.className = 'form-select form-select-sm bg-dark text-light';
-    options.forEach((value) => {
-      const option = document.createElement('option');
-      option.value = value;
-      option.textContent = value;
-      if (value === selected) option.selected = true;
-      select.append(option);
+    options.forEach((optionEntry) => {
+      const value = typeof optionEntry === 'string' ? optionEntry : optionEntry.value;
+      const text = typeof optionEntry === 'string' ? optionEntry : optionEntry.label ?? optionEntry.value;
+      const optionEl = document.createElement('option');
+      optionEl.value = value;
+      optionEl.textContent = text;
+      if (value === selected) optionEl.selected = true;
+      select.append(optionEl);
     });
     select.addEventListener('change', () => onChange(select.value));
     wrapper.append(select);

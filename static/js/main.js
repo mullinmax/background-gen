@@ -18,21 +18,50 @@ const historyList = document.getElementById('history-list');
 const togglePresets = document.getElementById('toggle-presets');
 const previewCanvas = document.getElementById('preview-canvas');
 
-let currentState = initState();
-const renderer = new WallpaperRenderer(previewCanvas, currentState);
-const controlPanel = new ControlPanel(controlsPanel, accordionRoot, currentState, handleStateChange);
-const presets = new PresetManager(presetsList, historyList, (state) => {
-  updateState(state);
-  controlPanel.setState(state);
-  renderer.updateState(state);
-  updateLocationHash(state);
-});
+let currentState = null;
+let renderer = null;
+let controlPanel = null;
+let presets = null;
+let shaderOptions = [];
 
-presets.loadPresets();
-presets.addHistory('Initial', currentState);
+bootstrap();
 
-bindUi();
-updateLocationHash(currentState);
+async function bootstrap() {
+  shaderOptions = await loadShaderOptions();
+  currentState = initState();
+  renderer = new WallpaperRenderer(previewCanvas, currentState);
+  controlPanel = new ControlPanel(controlsPanel, accordionRoot, currentState, handleStateChange, shaderOptions);
+  presets = new PresetManager(presetsList, historyList, (state) => {
+    updateState(state);
+    controlPanel.setState(state);
+    renderer.updateState(state);
+    updateLocationHash(state);
+  });
+
+  presets.loadPresets();
+  presets.addHistory('Initial', currentState);
+
+  bindUi();
+  updateLocationHash(currentState);
+}
+
+async function loadShaderOptions() {
+  try {
+    const response = await fetch('/api/shaders');
+    if (!response.ok) throw new Error('Failed to fetch shader catalog');
+    const payload = await response.json();
+    if (!Array.isArray(payload)) throw new Error('Invalid shader catalog response');
+    return payload;
+  } catch (error) {
+    console.warn('Falling back to built-in shader catalog', error);
+    return [
+      { id: 'classic', name: 'Classic Gradient', description: 'Baseline renderer.', default_strength: 0 },
+      { id: 'lumina', name: 'Lumina Bloom', description: 'Soft bloom highlight.', default_strength: 0.5 },
+      { id: 'nocturne', name: 'Nocturne Veil', description: 'Cool-toned variant.', default_strength: 0.6 },
+      { id: 'ember', name: 'Ember Drift', description: 'Warm edge glow.', default_strength: 0.5 },
+    ];
+  }
+}
 
 function initState() {
   const urlState = decodeStateFromUrl(window.location.hash.slice(1));
@@ -114,6 +143,7 @@ function bindUi() {
 }
 
 window.addEventListener('hashchange', () => {
+  if (!controlPanel || !renderer) return;
   const state = decodeStateFromUrl(window.location.hash.slice(1));
   if (state) {
     currentState = state;

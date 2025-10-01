@@ -1,3 +1,7 @@
+export function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
 export function hslToRgb(h, s, l) {
   const hue = ((h % 360) + 360) % 360;
   const c = (1 - Math.abs(2 * l - 1)) * s;
