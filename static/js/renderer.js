@@ -292,7 +292,8 @@ export class WallpaperRenderer {
     ctx.fillStyle = `hsl(${baseHue}, ${baseSat}%, ${baseLight}%)`;
     ctx.fillRect(0, 0, width, height);
     const palette = this.getGradientPalette(state);
-    if (state.gradient.type !== 'none') {
+    const gradientEnabled = state.gradient?.enabled !== false;
+    if (gradientEnabled && state.gradient.type !== 'none') {
       const gradient = this.createCanvasGradient(ctx, width, height, state.gradient, palette);
       if (gradient) {
         ctx.globalCompositeOperation = mapBlendToComposite(state.gradient.blend);
@@ -320,6 +321,9 @@ export class WallpaperRenderer {
   }
 
   applyShaderVariantFallback(ctx, width, height, state, palette) {
+    if (state.rendering?.enabled === false) {
+      return;
+    }
     const variant = state.rendering?.shader || 'classic';
     const strength = clamp(state.rendering?.shaderStrength ?? 0, 0, 1);
     if (variant === 'classic' || strength <= 0) {
@@ -442,6 +446,9 @@ export class WallpaperRenderer {
   }
 
   applyNoise(ctx, width, height, state) {
+    if (state.grain?.enabled === false) {
+      return;
+    }
     const amount = clamp(state.grain.amount, 0, 100);
     if (amount <= 0) return;
     const samples = Math.floor(width * height * (amount / 5000));
@@ -458,6 +465,9 @@ export class WallpaperRenderer {
   }
 
   applyVignette(ctx, width, height, vignetteState) {
+    if (vignetteState?.enabled === false) {
+      return;
+    }
     const strength = clamp(vignetteState?.strength ?? 0, 0, 1);
     if (strength <= 0) return;
     const radius = clamp(vignetteState.radius ?? 0.8, 0.1, 2);

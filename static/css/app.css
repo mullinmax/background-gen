@@ -22,6 +22,22 @@ body {
   padding-right: 0.5rem;
 }
 
+#presets-panel.collapsed #presets-list,
+#presets-panel.collapsed .history {
+  display: none;
+}
+
+#presets-panel.collapsed {
+  flex: 0 0 auto;
+  width: auto !important;
+  padding-right: 0;
+  max-height: none;
+}
+
+#presets-panel.collapsed > .d-flex {
+  margin-bottom: 0;
+}
+
 .list-group-item {
   cursor: pointer;
 }
@@ -68,6 +84,19 @@ input[type="color"] {
 }
 
 .stop-item .btn {
+  font-size: 0.75rem;
+}
+
+.accordion-item.section-disabled .accordion-body {
+  opacity: 0.5;
+}
+
+.accordion-item.section-disabled .accordion-body,
+.accordion-item.section-disabled .accordion-body * {
+  pointer-events: none;
+}
+
+.accordion-header .section-toggle .form-check-label {
   font-size: 0.75rem;
 }
 
