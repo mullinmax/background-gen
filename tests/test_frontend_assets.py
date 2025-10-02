@@ -46,6 +46,25 @@ def test_controls_sections_expose_effect_toggles():
     assert 'setSectionDisabled' in content
 
 
+def test_flat_gradient_type_listed():
+    controls_path = Path('static/js/controls.js')
+    content = controls_path.read_text('utf-8')
+    assert "const GRADIENT_TYPES = ['flat'" in content
+
+
+def test_renderer_normalizes_flat_gradient():
+    renderer_path = Path('static/js/renderer.js')
+    content = renderer_path.read_text('utf-8')
+    assert "state.gradient?.type === 'none' ? 'flat'" in content
+    assert "type === 'flat'" in content
+
+
+def test_setting_description_styles_present():
+    css_path = Path('static/css/app.css')
+    content = css_path.read_text('utf-8')
+    assert '.setting-description' in content
+
+
 def test_history_entries_expose_actions():
     presets_path = Path('static/js/presets.js')
     content = presets_path.read_text('utf-8')

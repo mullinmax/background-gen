@@ -1,7 +1,7 @@
 import { MAX_GRADIENT_STOPS, cloneState, randomSeed, defaultState } from './state.js';
 import { clamp, formatSeed, hslToRgb } from './utils.js';
 
-const GRADIENT_TYPES = ['none', 'linear', 'radial', 'conic', 'corner-glow'];
+const GRADIENT_TYPES = ['flat', 'linear', 'radial', 'conic', 'corner-glow'];
 const GRADIENT_MODES = ['continuous', 'discrete'];
 const BLEND_MODES = ['normal', 'overlay', 'soft-light', 'screen'];
 const GRAIN_SIZES = ['fine', 'normal', 'coarse'];
@@ -19,6 +19,7 @@ const GRAIN_ALGORITHMS = [
 const INTENSITY_CURVES = ['linear', 'log', 's-curve'];
 const VIGNETTE_MODES = ['multiply', 'soft-light'];
 const OUTPUT_FORMATS = ['png', 'webp', 'jpg'];
+const MULTI_OCTAVE_GRAIN_ALGOS = new Set(['value', 'perlin', 'fbm', 'simplex']);
 
 export class ControlPanel {
   constructor(root, accordionRoot, initialState, onChange, shaderOptions = []) {
@@ -28,6 +29,7 @@ export class ControlPanel {
     this.state = cloneState(initialState);
     this.shaderOptions = Array.isArray(shaderOptions) ? shaderOptions : [];
     this.shaderDescriptionEl = null;
+    this.visibilityBindings = [];
     this.sectionIdCounter = 0;
     this.render();
   }
@@ -42,64 +44,47 @@ export class ControlPanel {
     this.shaderDescriptionEl = null;
     this.shaderStrengthInput = null;
     this.shaderStrengthNumber = null;
+    this.visibilityBindings = [];
+    this.onColorPreviewUpdate = null;
     this.createCanvasSection();
-    this.createColorSection();
     this.createRenderingSection();
     this.createGradientSection();
     this.createGrainSection();
     this.createVignetteSection();
     this.createRandomSection();
     this.createOutputSection();
+    this.updateVisibilityBindings();
   }
 
   createCanvasSection() {
     const section = this.createSection('Canvas');
-    section.body.append(
-      this.createNumberInput('Width', this.state.canvas.width, 256, 10000, 1, (value) => {
-        this.state.canvas.width = value;
-        this.emitChange();
-      }),
-      this.createNumberInput('Height', this.state.canvas.height, 256, 10000, 1, (value) => {
-        this.state.canvas.height = value;
-        this.emitChange();
-      }),
-      this.createRangeInput('Preview Scale', this.state.canvas.previewScale, 0.1, 1, 0.05, (value) => {
+    const widthControl = this.createNumberInput('Width', this.state.canvas.width, 256, 10000, 1, (value) => {
+      this.state.canvas.width = value;
+      this.emitChange();
+    }, {
+      description: 'Output width in pixels for the rendered wallpaper.',
+    });
+    const heightControl = this.createNumberInput('Height', this.state.canvas.height, 256, 10000, 1, (value) => {
+      this.state.canvas.height = value;
+      this.emitChange();
+    }, {
+      description: 'Output height in pixels for the rendered wallpaper.',
+    });
+    const previewScaleControl = this.createRangeInput(
+      'Preview Scale',
+      this.state.canvas.previewScale,
+      0.1,
+      1,
+      0.05,
+      (value) => {
         this.state.canvas.previewScale = value;
         this.emitChange();
-      })
+      },
+      {
+        description: 'Zoom level for the on-screen preview (does not affect exports).',
+      }
     );
-  }
-
-  createColorSection() {
-    const section = this.createSection('Color');
-    section.body.append(
-      this.createRangeInput('Hue', this.state.color.hue, 0, 360, 1, (value) => {
-        this.state.color.hue = value;
-        this.emitChange();
-      }),
-      this.createRangeInput('Saturation', this.state.color.saturation, 0, 1, 0.01, (value) => {
-        this.state.color.saturation = value;
-        this.emitChange();
-      }, true),
-      this.createRangeInput('Lightness', this.state.color.lightness, 0, 1, 0.01, (value) => {
-        this.state.color.lightness = value;
-        this.emitChange();
-      }, true),
-      this.createRangeInput('Gamma', this.state.color.gamma, 0.8, 2.2, 0.01, (value) => {
-        this.state.color.gamma = value;
-        this.emitChange();
-      })
-    );
-    const preview = document.createElement('div');
-    preview.className = 'mt-3 p-3 rounded border border-secondary bg-dark text-center';
-    preview.textContent = 'Color Preview';
-    section.body.append(preview);
-    const updatePreview = () => {
-      const [r, g, b] = hslToRgb(this.state.color.hue, this.state.color.saturation, this.state.color.lightness);
-      preview.style.background = `rgb(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(b * 255)})`;
-    };
-    updatePreview();
-    this.onColorPreviewUpdate = updatePreview;
+    section.body.append(widthControl, heightControl, previewScaleControl);
   }
 
   createRenderingSection() {
@@ -122,28 +107,30 @@ export class ControlPanel {
       ? this.shaderOptions
       : [{ id: 'classic', name: 'Classic Gradient', description: 'Baseline renderer.', default_strength: 0 }]
     ).map((option) => ({ value: option.id, label: option.name, description: option.description, strength: option.default_strength ?? 0 }));
-    section.body.append(
-      this.createSelect(
-        'Shader Variant',
-        options,
-        this.state.rendering.shader,
-        (value) => {
-          this.state.rendering.shader = value;
-          const match = options.find((item) => item.value === value);
-          if (match && typeof match.strength === 'number' && Number.isFinite(match.strength) && match.strength >= 0) {
-            this.state.rendering.shaderStrength = clamp(match.strength, 0, 1);
-          }
-          this.updateShaderDescription();
-          this.emitChange();
-          if (this.shaderStrengthInput) {
-            this.shaderStrengthInput.value = String(this.state.rendering.shaderStrength);
-            if (this.shaderStrengthNumber) {
-              this.shaderStrengthNumber.value = String(Math.round(this.state.rendering.shaderStrength * 100));
-            }
+    const shaderVariantControl = this.createSelect(
+      'Shader Variant',
+      options,
+      this.state.rendering.shader,
+      (value) => {
+        this.state.rendering.shader = value;
+        const match = options.find((item) => item.value === value);
+        if (match && typeof match.strength === 'number' && Number.isFinite(match.strength) && match.strength >= 0) {
+          this.state.rendering.shaderStrength = clamp(match.strength, 0, 1);
+        }
+        this.updateShaderDescription();
+        this.emitChange();
+        if (this.shaderStrengthInput) {
+          this.shaderStrengthInput.value = String(this.state.rendering.shaderStrength);
+          if (this.shaderStrengthNumber) {
+            this.shaderStrengthNumber.value = String(Math.round(this.state.rendering.shaderStrength * 100));
           }
         }
-      )
+      },
+      {
+        description: 'Choose how the renderer tones and layers the base gradient.',
+      }
     );
+    section.body.append(shaderVariantControl);
     const description = document.createElement('p');
     description.className = 'small text-secondary mb-0';
     section.body.append(description);
@@ -159,12 +146,16 @@ export class ControlPanel {
         this.state.rendering.shaderStrength = value;
         this.emitChange();
       },
-      true
+      {
+        showAsPercent: true,
+        description: 'Blend amount for the selected shader variant relative to the base gradient.',
+      }
     );
     const [rangeEl, numberEl] = strengthControl.querySelectorAll('input');
     this.shaderStrengthInput = rangeEl;
     this.shaderStrengthNumber = numberEl;
     section.body.append(strengthControl);
+    this.registerVisibility(strengthControl, () => this.state.rendering.shader !== 'classic');
     this.setSectionDisabled(section, this.state.rendering.enabled === false);
   }
 
@@ -174,6 +165,9 @@ export class ControlPanel {
     }
     if (typeof this.state.gradient.enabled !== 'boolean') {
       this.state.gradient.enabled = true;
+    }
+    if (this.state.gradient.type === 'none' || !GRADIENT_TYPES.includes(this.state.gradient.type)) {
+      this.state.gradient.type = 'flat';
     }
     const section = this.createSection('Gradient', {
       toggle: {
@@ -185,47 +179,82 @@ export class ControlPanel {
       },
     });
     const palette = this.ensureGradientPalette();
+    const typeControl = this.createSelect('Type', GRADIENT_TYPES, this.state.gradient.type, (value) => {
+      this.state.gradient.type = value;
+      this.emitChange();
+    }, {
+      description: 'Select the gradient style. Choose Flat for a solid color fill.',
+    });
+    section.body.append(typeControl);
+    section.body.append(this.createBaseColorControls());
+    const modeControl = this.createSelect('Mode', GRADIENT_MODES, this.state.gradient.mode, (value) => {
+      this.state.gradient.mode = value;
+      this.emitChange();
+    }, {
+      description: 'Blend stops smoothly or snap between colors for stepped bands.',
+    });
+    const angleControl = this.createRangeInput('Angle', this.state.gradient.angle, 0, 360, 1, (value) => {
+      this.state.gradient.angle = value;
+      this.emitChange();
+    }, {
+      description: 'Rotate the gradient orientation in degrees.',
+    });
+    const centerXControl = this.createRangeInput('Center X', this.state.gradient.center.x, 0, 1, 0.01, (value) => {
+      this.state.gradient.center.x = value;
+      this.emitChange();
+    }, {
+      showAsPercent: true,
+      description: 'Horizontal origin of the gradient focus.',
+    });
+    const centerYControl = this.createRangeInput('Center Y', this.state.gradient.center.y, 0, 1, 0.01, (value) => {
+      this.state.gradient.center.y = value;
+      this.emitChange();
+    }, {
+      showAsPercent: true,
+      description: 'Vertical origin of the gradient focus.',
+    });
+    const scaleControl = this.createRangeInput('Scale', this.state.gradient.scale, 0.1, 2, 0.01, (value) => {
+      this.state.gradient.scale = value;
+      this.emitChange();
+    }, {
+      description: 'Radius multiplier for radial gradients.',
+    });
+    const paletteHueControl = this.createRangeInput('Palette Hue', palette.hue, 0, 360, 1, (value) => {
+      this.state.gradient.palette.hue = value;
+      this.emitChange();
+    }, {
+      description: 'Base hue applied to gradient color stops.',
+    });
+    const paletteSatControl = this.createRangeInput('Palette Saturation', palette.saturation, 0, 1, 0.01, (value) => {
+      this.state.gradient.palette.saturation = value;
+      this.emitChange();
+    }, {
+      showAsPercent: true,
+      description: 'Color saturation baseline for gradient stops.',
+    });
+    const paletteLightControl = this.createRangeInput('Palette Lightness', palette.lightness, 0, 1, 0.01, (value) => {
+      this.state.gradient.palette.lightness = value;
+      this.emitChange();
+    }, {
+      showAsPercent: true,
+      description: 'Lightness baseline for gradient stops.',
+    });
+    const blendControl = this.createSelect('Blend', BLEND_MODES, this.state.gradient.blend, (value) => {
+      this.state.gradient.blend = value;
+      this.emitChange();
+    }, {
+      description: 'Canvas blend mode used when applying the gradient.',
+    });
     section.body.append(
-      this.createSelect('Type', GRADIENT_TYPES, this.state.gradient.type, (value) => {
-        this.state.gradient.type = value;
-        this.emitChange();
-      }),
-      this.createSelect('Mode', GRADIENT_MODES, this.state.gradient.mode, (value) => {
-        this.state.gradient.mode = value;
-        this.emitChange();
-      }),
-      this.createRangeInput('Angle', this.state.gradient.angle, 0, 360, 1, (value) => {
-        this.state.gradient.angle = value;
-        this.emitChange();
-      }),
-      this.createRangeInput('Center X', this.state.gradient.center.x, 0, 1, 0.01, (value) => {
-        this.state.gradient.center.x = value;
-        this.emitChange();
-      }),
-      this.createRangeInput('Center Y', this.state.gradient.center.y, 0, 1, 0.01, (value) => {
-        this.state.gradient.center.y = value;
-        this.emitChange();
-      }),
-      this.createRangeInput('Scale', this.state.gradient.scale, 0.1, 2, 0.01, (value) => {
-        this.state.gradient.scale = value;
-        this.emitChange();
-      }),
-      this.createRangeInput('Palette Hue', palette.hue, 0, 360, 1, (value) => {
-        this.state.gradient.palette.hue = value;
-        this.emitChange();
-      }),
-      this.createRangeInput('Palette Saturation', palette.saturation, 0, 1, 0.01, (value) => {
-        this.state.gradient.palette.saturation = value;
-        this.emitChange();
-      }, true),
-      this.createRangeInput('Palette Lightness', palette.lightness, 0, 1, 0.01, (value) => {
-        this.state.gradient.palette.lightness = value;
-        this.emitChange();
-      }, true),
-      this.createSelect('Blend', BLEND_MODES, this.state.gradient.blend, (value) => {
-        this.state.gradient.blend = value;
-        this.emitChange();
-      })
+      modeControl,
+      angleControl,
+      centerXControl,
+      centerYControl,
+      scaleControl,
+      paletteHueControl,
+      paletteSatControl,
+      paletteLightControl,
+      blendControl
     );
     const stopContainer = document.createElement('div');
     stopContainer.className = 'mt-3 stop-list';
@@ -239,7 +268,60 @@ export class ControlPanel {
     this.stopContainer = stopContainer;
     this.addStopButton = addButton;
     this.renderGradientStops();
+    this.registerVisibility(modeControl, () => this.state.gradient.type !== 'flat');
+    this.registerVisibility(angleControl, () => ['linear', 'conic'].includes(this.state.gradient.type));
+    this.registerVisibility(centerXControl, () => ['radial', 'conic', 'corner-glow'].includes(this.state.gradient.type));
+    this.registerVisibility(centerYControl, () => ['radial', 'conic', 'corner-glow'].includes(this.state.gradient.type));
+    this.registerVisibility(scaleControl, () => this.state.gradient.type === 'radial');
+    this.registerVisibility(paletteHueControl, () => this.state.gradient.type !== 'flat');
+    this.registerVisibility(paletteSatControl, () => this.state.gradient.type !== 'flat');
+    this.registerVisibility(paletteLightControl, () => this.state.gradient.type !== 'flat');
+    this.registerVisibility(blendControl, () => this.state.gradient.type !== 'flat');
+    this.registerVisibility(stopContainer, () => this.state.gradient.type !== 'flat');
+    this.registerVisibility(addButton, () => this.state.gradient.type !== 'flat');
     this.setSectionDisabled(section, this.state.gradient.enabled === false);
+  }
+
+  createBaseColorControls() {
+    const container = document.createElement('div');
+    container.className = 'd-flex flex-column gap-2';
+    const hueControl = this.createRangeInput('Base Hue', this.state.color.hue, 0, 360, 1, (value) => {
+      this.state.color.hue = value;
+      this.emitChange();
+    }, {
+      description: 'Hue for the underlying canvas fill color.',
+    });
+    const saturationControl = this.createRangeInput('Base Saturation', this.state.color.saturation, 0, 1, 0.01, (value) => {
+      this.state.color.saturation = value;
+      this.emitChange();
+    }, {
+      showAsPercent: true,
+      description: 'Saturation of the solid base color before gradients.',
+    });
+    const lightnessControl = this.createRangeInput('Base Lightness', this.state.color.lightness, 0, 1, 0.01, (value) => {
+      this.state.color.lightness = value;
+      this.emitChange();
+    }, {
+      showAsPercent: true,
+      description: 'Lightness of the base fill applied across the canvas.',
+    });
+    const gammaControl = this.createRangeInput('Base Gamma', this.state.color.gamma, 0.8, 2.2, 0.01, (value) => {
+      this.state.color.gamma = value;
+      this.emitChange();
+    }, {
+      description: 'Applies gamma compensation when shading the base color.',
+    });
+    const preview = document.createElement('div');
+    preview.className = 'mt-2 p-3 rounded border border-secondary bg-dark text-center color-preview';
+    preview.textContent = 'Base Color Preview';
+    const updatePreview = () => {
+      const [r, g, b] = hslToRgb(this.state.color.hue, this.state.color.saturation, this.state.color.lightness);
+      preview.style.background = `rgb(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(b * 255)})`;
+    };
+    updatePreview();
+    this.onColorPreviewUpdate = updatePreview;
+    container.append(hueControl, saturationControl, lightnessControl, gammaControl, preview);
+    return container;
   }
 
   ensureGradientPalette() {
@@ -284,19 +366,30 @@ export class ControlPanel {
         this.createRangeInput('Position', stop.pos, 0, 1, 0.01, (value) => {
           this.state.gradient.stops[index].pos = value;
           this.emitChange();
-        }, true),
+        }, {
+          showAsPercent: true,
+          description: 'Placement of the stop along the gradient span.',
+        }),
         this.createRangeInput('Hue Shift', stop.hueShift, -180, 180, 1, (value) => {
           this.state.gradient.stops[index].hueShift = value;
           this.emitChange();
+        }, {
+          description: 'Hue offset relative to the palette base color.',
         }),
         this.createRangeInput('Lightness Δ', stop.lightnessDelta, -1, 1, 0.01, (value) => {
           this.state.gradient.stops[index].lightnessDelta = value;
           this.emitChange();
-        }, true),
+        }, {
+          showAsPercent: true,
+          description: 'Lightness adjustment for this stop.',
+        }),
         this.createRangeInput('Opacity', stop.opacity, 0, 1, 0.01, (value) => {
           this.state.gradient.stops[index].opacity = value;
           this.emitChange();
-        }, true)
+        }, {
+          showAsPercent: true,
+          description: 'Transparency of this color stop.',
+        })
       );
       this.stopContainer.append(item);
     });
@@ -339,48 +432,92 @@ export class ControlPanel {
         },
       },
     });
-    section.body.append(
-      this.createRangeInput('Amount', this.state.grain.amount, 0, 100, 1, (value) => {
-        this.state.grain.amount = value;
-        this.emitChange();
-      }),
-      this.createSelect('Size', GRAIN_SIZES, this.state.grain.size, (value) => {
-        this.state.grain.size = value;
-        this.emitChange();
-      }),
-      this.createSelect('Algorithm', GRAIN_ALGORITHMS, this.state.grain.algorithm, (value) => {
-        this.state.grain.algorithm = value;
-        this.emitChange();
-      }),
-      this.createNumberInput('Octaves', this.state.grain.octaves, 1, 8, 1, (value) => {
-        this.state.grain.octaves = value;
-        this.emitChange();
-      }),
-      this.createRangeInput('Lacunarity', this.state.grain.lacunarity, 1, 4, 0.05, (value) => {
-        this.state.grain.lacunarity = value;
-        this.emitChange();
-      }),
-      this.createRangeInput('Gain', this.state.grain.gain, 0.1, 1, 0.01, (value) => {
-        this.state.grain.gain = value;
-        this.emitChange();
-      }),
-      this.createCheckbox('Chroma Noise', this.state.grain.chroma.enabled, (checked) => {
-        this.state.grain.chroma.enabled = checked;
-        this.emitChange();
-      }),
-      this.createRangeInput('Chroma Intensity', this.state.grain.chroma.intensity, 0, 0.2, 0.01, (value) => {
+    const amountControl = this.createRangeInput('Amount', this.state.grain.amount, 0, 100, 1, (value) => {
+      this.state.grain.amount = value;
+      this.emitChange();
+    }, {
+      description: 'Strength of the grain overlay applied to the image.',
+    });
+    const sizeControl = this.createSelect('Size', GRAIN_SIZES, this.state.grain.size, (value) => {
+      this.state.grain.size = value;
+      this.emitChange();
+    }, {
+      description: 'Base scale for noise features within the grain texture.',
+    });
+    const algorithmControl = this.createSelect('Algorithm', GRAIN_ALGORITHMS, this.state.grain.algorithm, (value) => {
+      this.state.grain.algorithm = value;
+      this.emitChange();
+    }, {
+      description: 'Noise model used to synthesize the grain pattern.',
+    });
+    const octavesControl = this.createNumberInput('Octaves', this.state.grain.octaves, 1, 8, 1, (value) => {
+      this.state.grain.octaves = value;
+      this.emitChange();
+    }, {
+      description: 'Number of layered noise passes for fractal grain.',
+    });
+    const lacunarityControl = this.createRangeInput('Lacunarity', this.state.grain.lacunarity, 1, 4, 0.05, (value) => {
+      this.state.grain.lacunarity = value;
+      this.emitChange();
+    }, {
+      description: 'Frequency multiplier between successive noise octaves.',
+    });
+    const gainControl = this.createRangeInput('Gain', this.state.grain.gain, 0.1, 1, 0.01, (value) => {
+      this.state.grain.gain = value;
+      this.emitChange();
+    }, {
+      description: 'Amplitude falloff controlling contrast between octaves.',
+    });
+    const chromaToggle = this.createCheckbox('Chroma Noise', this.state.grain.chroma.enabled, (checked) => {
+      this.state.grain.chroma.enabled = checked;
+      this.emitChange();
+    }, {
+      description: 'Adds subtle color variation to the grain.',
+    });
+    const chromaIntensityControl = this.createRangeInput(
+      'Chroma Intensity',
+      this.state.grain.chroma.intensity,
+      0,
+      0.2,
+      0.01,
+      (value) => {
         this.state.grain.chroma.intensity = value;
         this.emitChange();
-      }, true),
-      this.createSelect('Intensity Curve', INTENSITY_CURVES, this.state.grain.intensityCurve, (value) => {
-        this.state.grain.intensityCurve = value;
-        this.emitChange();
-      }),
-      this.createRangeInput('Protect Shadows', this.state.grain.protectShadows, 0, 0.2, 0.01, (value) => {
+      },
+      {
+        showAsPercent: true,
+        description: 'Strength of color modulation when chroma noise is enabled.',
+      }
+    );
+    const intensityCurveControl = this.createSelect('Intensity Curve', INTENSITY_CURVES, this.state.grain.intensityCurve, (value) => {
+      this.state.grain.intensityCurve = value;
+      this.emitChange();
+    }, {
+      description: 'Adjusts how grain values are distributed across shadows and highlights.',
+    });
+    const protectShadowsControl = this.createRangeInput('Protect Shadows', this.state.grain.protectShadows, 0, 0.2, 0.01, (value) => {
       this.state.grain.protectShadows = value;
       this.emitChange();
-    }, true)
+    }, {
+      showAsPercent: true,
+      description: 'Reduces grain strength in the darkest portions of the image.',
+    });
+    section.body.append(
+      amountControl,
+      sizeControl,
+      algorithmControl,
+      octavesControl,
+      lacunarityControl,
+      gainControl,
+      chromaToggle,
+      chromaIntensityControl,
+      intensityCurveControl,
+      protectShadowsControl
     );
+    this.registerVisibility(octavesControl, () => MULTI_OCTAVE_GRAIN_ALGOS.has(this.state.grain.algorithm));
+    this.registerVisibility(lacunarityControl, () => MULTI_OCTAVE_GRAIN_ALGOS.has(this.state.grain.algorithm));
+    this.registerVisibility(gainControl, () => MULTI_OCTAVE_GRAIN_ALGOS.has(this.state.grain.algorithm));
+    this.registerVisibility(chromaIntensityControl, () => this.state.grain.chroma.enabled);
     this.setSectionDisabled(section, this.state.grain.enabled === false);
   }
 
@@ -400,27 +537,45 @@ export class ControlPanel {
         },
       },
     });
-    section.body.append(
-      this.createRangeInput('Strength', this.state.vignette.strength, 0, 1, 0.01, (value) => {
-        this.state.vignette.strength = value;
-        this.emitChange();
-      }, true),
-      this.createRangeInput('Radius', this.state.vignette.radius, 0, 1, 0.01, (value) => {
-        this.state.vignette.radius = value;
-        this.emitChange();
-      }, true),
-      this.createRangeInput('Feather', this.state.vignette.feather, 0, 1, 0.01, (value) => {
-        this.state.vignette.feather = value;
-        this.emitChange();
-      }, true),
-      this.createRangeInput('Roundness', this.state.vignette.roundness, 0.2, 2, 0.01, (value) => {
-        this.state.vignette.roundness = value;
-        this.emitChange();
-      }),
-      this.createSelect('Mode', VIGNETTE_MODES, this.state.vignette.mode, (value) => {
+    const strengthControl = this.createRangeInput('Strength', this.state.vignette.strength, 0, 1, 0.01, (value) => {
+      this.state.vignette.strength = value;
+      this.emitChange();
+    }, {
+      showAsPercent: true,
+      description: 'Opacity of the vignette overlay.',
+    });
+    const radiusControl = this.createRangeInput('Radius', this.state.vignette.radius, 0, 1, 0.01, (value) => {
+      this.state.vignette.radius = value;
+      this.emitChange();
+    }, {
+      showAsPercent: true,
+      description: 'Size of the bright center area before darkening begins.',
+    });
+    const featherControl = this.createRangeInput('Feather', this.state.vignette.feather, 0, 1, 0.01, (value) => {
+      this.state.vignette.feather = value;
+      this.emitChange();
+    }, {
+      showAsPercent: true,
+      description: 'Softness of the transition between center and edges.',
+    });
+    const roundnessControl = this.createRangeInput('Roundness', this.state.vignette.roundness, 0.2, 2, 0.01, (value) => {
+      this.state.vignette.roundness = value;
+      this.emitChange();
+    }, {
+      description: 'Aspect ratio of the vignette shape (lower = more rectangular).',
+    });
+    const modeControl = this.createSelect('Mode', VIGNETTE_MODES, this.state.vignette.mode, (value) => {
       this.state.vignette.mode = value;
       this.emitChange();
-    })
+    }, {
+      description: 'Blend mode used when darkening the edges.',
+    });
+    section.body.append(
+      strengthControl,
+      radiusControl,
+      featherControl,
+      roundnessControl,
+      modeControl
     );
     this.setSectionDisabled(section, this.state.vignette.enabled === false);
   }
@@ -436,6 +591,8 @@ export class ControlPanel {
       this.state.random.seed = value >>> 0;
       seedDisplay.textContent = `Seed: ${formatSeed(this.state.random.seed)}`;
       this.emitChange();
+    }, {
+      description: 'Random seed that drives gradient, grain, and vignette variation.',
     });
     section.body.append(seedInput);
     const randomizeButton = document.getElementById('randomize-button');
@@ -454,20 +611,26 @@ export class ControlPanel {
 
   createOutputSection() {
     const section = this.createSection('Output');
-    section.body.append(
-      this.createSelect('Format', OUTPUT_FORMATS, this.state.output.format, (value) => {
-        this.state.output.format = value;
-        this.emitChange();
-      }),
-      this.createRangeInput('JPEG Quality', this.state.output.jpgQuality, 0.6, 1, 0.01, (value) => {
-        this.state.output.jpgQuality = value;
-        this.emitChange();
-      }),
-      this.createCheckbox('Embed Metadata', this.state.output.embedMetadata, (checked) => {
-        this.state.output.embedMetadata = checked;
-        this.emitChange();
-      })
-    );
+    const formatControl = this.createSelect('Format', OUTPUT_FORMATS, this.state.output.format, (value) => {
+      this.state.output.format = value;
+      this.emitChange();
+    }, {
+      description: 'File type to generate when exporting the wallpaper.',
+    });
+    const jpegQualityControl = this.createRangeInput('JPEG Quality', this.state.output.jpgQuality, 0.6, 1, 0.01, (value) => {
+      this.state.output.jpgQuality = value;
+      this.emitChange();
+    }, {
+      description: 'Compression quality for JPEG exports (higher = larger file).',
+    });
+    const metadataControl = this.createCheckbox('Embed Metadata', this.state.output.embedMetadata, (checked) => {
+      this.state.output.embedMetadata = checked;
+      this.emitChange();
+    }, {
+      description: 'Include the generator settings in the exported file metadata.',
+    });
+    section.body.append(formatControl, jpegQualityControl, metadataControl);
+    this.registerVisibility(jpegQualityControl, () => this.state.output.format === 'jpg');
   }
 
   updateShaderDescription() {
@@ -554,10 +717,53 @@ export class ControlPanel {
     });
   }
 
-  createRangeInput(label, value, min, max, step, onChange, showAsPercent = false) {
+  registerVisibility(element, predicate) {
+    if (!element || typeof predicate !== 'function') return;
+    const binding = { element, predicate };
+    this.visibilityBindings.push(binding);
+    this.updateVisibilityForBinding(binding);
+  }
+
+  updateVisibilityBindings() {
+    this.visibilityBindings.forEach((binding) => this.updateVisibilityForBinding(binding));
+  }
+
+  updateVisibilityForBinding(binding) {
+    if (!binding?.element || typeof binding.predicate !== 'function') {
+      return;
+    }
+    const shouldShow = Boolean(binding.predicate());
+    binding.element.hidden = !shouldShow;
+    if (shouldShow) {
+      binding.element.removeAttribute('aria-hidden');
+    } else {
+      binding.element.setAttribute('aria-hidden', 'true');
+    }
+  }
+
+  applyDescription(element, description) {
+    if (!description || !element) return;
+    element.setAttribute('title', description);
+    const desc = document.createElement('div');
+    desc.className = 'setting-description';
+    desc.textContent = description;
+    element.append(desc);
+  }
+
+  createRangeInput(label, value, min, max, step, onChange, options = {}) {
+    let showAsPercent = false;
+    let description;
+    if (typeof options === 'boolean') {
+      showAsPercent = options;
+    } else if (options && typeof options === 'object') {
+      showAsPercent = Boolean(options.showAsPercent);
+      description = options.description;
+    }
     const wrapper = document.createElement('label');
-    wrapper.className = 'form-label w-100 slider-input';
-    wrapper.textContent = label;
+    wrapper.className = 'form-label w-100';
+    const title = document.createElement('span');
+    title.className = 'setting-label';
+    title.textContent = label;
     const range = document.createElement('input');
     range.type = 'range';
     range.className = 'form-range';
@@ -572,6 +778,10 @@ export class ControlPanel {
     number.min = showAsPercent ? min * 100 : min;
     number.max = showAsPercent ? max * 100 : max;
     number.step = showAsPercent ? step * 100 : step;
+    number.inputMode = 'decimal';
+    const sliderRow = document.createElement('div');
+    sliderRow.className = 'slider-input';
+    sliderRow.append(range, number);
     const sync = (newValue) => {
       const clamped = clamp(newValue, min, max);
       range.value = String(clamped);
@@ -588,14 +798,18 @@ export class ControlPanel {
       const normalized = showAsPercent ? val / 100 : val;
       sync(normalized);
     });
-    wrapper.append(range, number);
+    wrapper.append(title, sliderRow);
+    this.applyDescription(wrapper, description);
     return wrapper;
   }
 
-  createNumberInput(label, value, min, max, step, onChange) {
+  createNumberInput(label, value, min, max, step, onChange, options = {}) {
+    const description = options?.description;
     const wrapper = document.createElement('label');
     wrapper.className = 'form-label w-100';
-    wrapper.textContent = label;
+    const title = document.createElement('span');
+    title.className = 'setting-label';
+    title.textContent = label;
     const input = document.createElement('input');
     input.type = 'number';
     input.className = 'form-control form-control-sm';
@@ -608,14 +822,18 @@ export class ControlPanel {
       input.value = val;
       onChange(val);
     });
-    wrapper.append(input);
+    wrapper.append(title, input);
+    this.applyDescription(wrapper, description);
     return wrapper;
   }
 
-  createSelect(label, options, selected, onChange) {
+  createSelect(label, options, selected, onChange, config = {}) {
+    const description = config?.description;
     const wrapper = document.createElement('label');
     wrapper.className = 'form-label w-100';
-    wrapper.textContent = label;
+    const title = document.createElement('span');
+    title.className = 'setting-label';
+    title.textContent = label;
     const select = document.createElement('select');
     select.className = 'form-select form-select-sm bg-dark text-light';
     options.forEach((optionEntry) => {
@@ -628,11 +846,13 @@ export class ControlPanel {
       select.append(optionEl);
     });
     select.addEventListener('change', () => onChange(select.value));
-    wrapper.append(select);
+    wrapper.append(title, select);
+    this.applyDescription(wrapper, description);
     return wrapper;
   }
 
-  createCheckbox(label, checked, onChange) {
+  createCheckbox(label, checked, onChange, options = {}) {
+    const description = options?.description;
     const wrapper = document.createElement('div');
     wrapper.className = 'form-check form-switch';
     const input = document.createElement('input');
@@ -644,6 +864,7 @@ export class ControlPanel {
     span.className = 'form-check-label';
     span.textContent = label;
     wrapper.append(input, span);
+    this.applyDescription(wrapper, description);
     return wrapper;
   }
 
@@ -653,6 +874,7 @@ export class ControlPanel {
   }
 
   emitChange() {
+    this.updateVisibilityBindings();
     this.onColorPreviewUpdate?.();
     this.onChange(this.stateSnapshot);
   }
