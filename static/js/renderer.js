@@ -1,19 +1,9 @@
 import { createCanvas2DContext } from './context.js';
+import { generateGrainData } from './noise.js';
 import { cloneState } from './state.js';
 import { clamp, downloadBlob, formatDimension, hslToRgb, toast } from './utils.js';
 
 const DPR = () => window.devicePixelRatio || 1;
-
-function createPrng(seed) {
-  let t = seed >>> 0;
-  return () => {
-    t += 0x6d2b79f5;
-    let x = t;
-    x = Math.imul(x ^ (x >>> 15), x | 1);
-    x ^= x + Math.imul(x ^ (x >>> 7), x | 61);
-    return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
-  };
-}
 
 function createCrc32Table() {
   const table = new Uint32Array(256);
@@ -126,6 +116,9 @@ export class WallpaperRenderer {
     this.canvas2d = createCanvas2DContext(this.canvas);
     this.bufferCanvas = document.createElement('canvas');
     this.bufferCtx = createCanvas2DContext(this.bufferCanvas);
+    this.noiseCanvas = document.createElement('canvas');
+    this.noiseCtx = createCanvas2DContext(this.noiseCanvas);
+    this.noiseCacheKey = null;
     this.previewZoom = 1;
     this.previewOffset = { x: 0, y: 0 };
     this.dragging = false;
@@ -211,6 +204,7 @@ export class WallpaperRenderer {
   updateState(nextState) {
     this.state = cloneState(nextState);
     this.wallpaperDirty = true;
+    this.noiseCacheKey = null;
     this.handleResize();
     this.clampPreviewOffset();
     this.needsRender = true;
@@ -451,17 +445,53 @@ export class WallpaperRenderer {
     }
     const amount = clamp(state.grain.amount, 0, 100);
     if (amount <= 0) return;
-    const samples = Math.floor(width * height * (amount / 5000));
-    const prng = createPrng(state.random.seed);
-    ctx.save();
-    ctx.globalAlpha = clamp(amount / 150, 0.02, 0.15);
-    ctx.fillStyle = '#ffffff';
-    for (let i = 0; i < samples; i += 1) {
-      const x = prng() * width;
-      const y = prng() * height;
-      ctx.fillRect(x, y, 1, 1);
+    const paletteLightness = clamp(state.gradient?.enabled === false ? state.color.lightness : this.getGradientPalette(state).lightness, 0, 1);
+    const cacheKey = this.createGrainCacheKey(width, height, state.grain, paletteLightness, state.random.seed);
+    if (this.noiseCacheKey !== cacheKey) {
+      const grainData = generateGrainData(width, height, state.grain, paletteLightness, state.random.seed);
+      if (!grainData) {
+        return;
+      }
+      this.noiseCanvas.width = grainData.width;
+      this.noiseCanvas.height = grainData.height;
+      this.noiseCtx = createCanvas2DContext(this.noiseCanvas);
+      if (!this.noiseCtx) {
+        return;
+      }
+      const imageData = new ImageData(grainData.data, grainData.width, grainData.height);
+      this.noiseCtx.putImageData(imageData, 0, 0);
+      this.noiseCacheKey = cacheKey;
     }
+    if (!this.noiseCanvas || !this.noiseCtx) {
+      return;
+    }
+    ctx.save();
+    ctx.globalCompositeOperation = 'overlay';
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(this.noiseCanvas, 0, 0, width, height);
     ctx.restore();
+  }
+
+  createGrainCacheKey(width, height, grainState, paletteLightness, seed) {
+    const chroma = grainState.chroma ?? {};
+    return [
+      width,
+      height,
+      seed,
+      clamp(grainState.amount ?? 0, 0, 100),
+      grainState.size ?? 'normal',
+      grainState.algorithm ?? 'uniform',
+      grainState.octaves ?? 1,
+      grainState.lacunarity ?? 2,
+      grainState.gain ?? 0.5,
+      chroma.enabled ? 1 : 0,
+      chroma.intensity ?? 0,
+      grainState.intensityCurve ?? 'linear',
+      grainState.protectShadows ?? 0,
+      paletteLightness,
+    ]
+      .map((value) => (typeof value === 'number' ? value.toString() : value))
+      .join('|');
   }
 
   applyVignette(ctx, width, height, vignetteState) {
