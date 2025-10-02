@@ -67,6 +67,26 @@ input[type="color"] {
   width: 5rem;
 }
 
+.setting-label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+.setting-description {
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.65);
+  margin-top: 0.25rem;
+}
+
+.form-check .setting-description {
+  margin-left: 2.5rem;
+}
+
+.color-preview {
+  color: rgba(255, 255, 255, 0.85);
+}
+
 .stop-list {
   display: flex;
   flex-direction: column;

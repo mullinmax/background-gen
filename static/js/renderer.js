@@ -285,10 +285,12 @@ export class WallpaperRenderer {
     const baseLight = state.color.lightness * 100;
     ctx.fillStyle = `hsl(${baseHue}, ${baseSat}%, ${baseLight}%)`;
     ctx.fillRect(0, 0, width, height);
+    const gradientType = state.gradient?.type === 'none' ? 'flat' : state.gradient?.type;
+    const gradientEnabled = state.gradient?.enabled !== false && gradientType !== 'flat';
     const palette = this.getGradientPalette(state);
-    const gradientEnabled = state.gradient?.enabled !== false;
-    if (gradientEnabled && state.gradient.type !== 'none') {
-      const gradient = this.createCanvasGradient(ctx, width, height, state.gradient, palette);
+    if (gradientEnabled) {
+      const gradientState = { ...state.gradient, type: gradientType };
+      const gradient = this.createCanvasGradient(ctx, width, height, gradientState, palette);
       if (gradient) {
         ctx.globalCompositeOperation = mapBlendToComposite(state.gradient.blend);
         ctx.fillStyle = gradient;
@@ -303,6 +305,14 @@ export class WallpaperRenderer {
   }
 
   getGradientPalette(state) {
+    const gradientType = state.gradient?.type === 'none' ? 'flat' : state.gradient?.type;
+    if (gradientType === 'flat') {
+      return {
+        hue: state.color.hue,
+        saturation: clamp(state.color.saturation, 0, 1),
+        lightness: clamp(state.color.lightness, 0, 1),
+      };
+    }
     const palette = state.gradient?.palette ?? {};
     const hue = typeof palette.hue === 'number' ? palette.hue : state.color.hue;
     const saturation = typeof palette.saturation === 'number' ? palette.saturation : state.color.saturation;
@@ -370,8 +380,12 @@ export class WallpaperRenderer {
   createCanvasGradient(ctx, width, height, gradientState, palette) {
     const stops = gradientState.stops ?? [];
     if (!stops.length) return null;
+    const type = gradientState.type === 'none' ? 'flat' : gradientState.type;
+    if (type === 'flat') {
+      return null;
+    }
     let gradient = null;
-    if (gradientState.type === 'linear') {
+    if (type === 'linear') {
       const angle = (gradientState.angle * Math.PI) / 180;
       const x = Math.cos(angle);
       const y = Math.sin(angle);
@@ -382,7 +396,7 @@ export class WallpaperRenderer {
         width / 2 + x * half,
         height / 2 + y * half
       );
-    } else if (gradientState.type === 'radial') {
+    } else if (type === 'radial') {
       gradient = ctx.createRadialGradient(
         width * gradientState.center.x,
         height * gradientState.center.y,
@@ -391,7 +405,7 @@ export class WallpaperRenderer {
         height * gradientState.center.y,
         Math.max(width, height) * gradientState.scale
       );
-    } else if (gradientState.type === 'conic') {
+    } else if (type === 'conic') {
       if (typeof ctx.createConicGradient !== 'function') {
         console.warn('Conic gradients are not supported in this browser.');
         return null;
@@ -401,7 +415,7 @@ export class WallpaperRenderer {
         width * gradientState.center.x,
         height * gradientState.center.y
       );
-    } else if (gradientState.type === 'corner-glow') {
+    } else if (type === 'corner-glow') {
       const cornerX = clamp(gradientState.center.x, 0, 1) * width;
       const cornerY = clamp(gradientState.center.y, 0, 1) * height;
       gradient = ctx.createRadialGradient(
@@ -445,7 +459,10 @@ export class WallpaperRenderer {
     }
     const amount = clamp(state.grain.amount, 0, 100);
     if (amount <= 0) return;
-    const paletteLightness = clamp(state.gradient?.enabled === false ? state.color.lightness : this.getGradientPalette(state).lightness, 0, 1);
+    const gradientType = state.gradient?.type === 'none' ? 'flat' : state.gradient?.type;
+    const gradientActive = state.gradient?.enabled !== false && gradientType !== 'flat';
+    const palette = this.getGradientPalette(state);
+    const paletteLightness = clamp(gradientActive ? palette.lightness : state.color.lightness, 0, 1);
     const cacheKey = this.createGrainCacheKey(width, height, state.grain, paletteLightness, state.random.seed);
     if (this.noiseCacheKey !== cacheKey) {
       const grainData = generateGrainData(width, height, state.grain, paletteLightness, state.random.seed);
